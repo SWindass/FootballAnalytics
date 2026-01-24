@@ -208,13 +208,57 @@ teams = load_teams()
 with st.sidebar:
     days_ahead = st.slider("Days ahead", 1, 14, 7)
 
-    with st.expander("About"):
+    with st.expander("Glossary", expanded=False):
         st.markdown("""
-        **Models:** ELO (35%) + Poisson (40%) + XGBoost (25%)
+**Edge**
+The advantage you have over the bookmaker. Calculated as:
+`Model Probability - Implied Probability`
+E.g., if our model says 60% but odds imply 50%, edge = 10%
 
-        **Value Bet:** Model prob > implied + 5%
+---
+**Kelly Stake**
+Optimal bet size based on your edge and the odds. Formula:
+`(Edge × Odds - 1) / (Odds - 1)`
+We use 0.25 fractional Kelly (25% of full Kelly) to reduce variance.
 
-        **Kelly:** 0.25 fractional for risk management
+---
+**Implied Probability**
+What the bookmaker's odds suggest the true probability is:
+`1 / Decimal Odds`
+E.g., odds of 2.00 imply 50% probability
+
+---
+**ELO Rating**
+A strength rating system (like chess). Higher = stronger team.
+Average is ~1500. Top teams: 1700+, Relegation zone: <1400
+
+---
+**xG (Expected Goals)**
+Statistical measure of chance quality. An xG of 1.5 means the chances created would typically result in 1.5 goals.
+
+---
+**Poisson Model**
+Predicts goals using average scoring rates. Assumes goals follow a Poisson distribution.
+
+---
+**BTTS**
+Both Teams To Score - a bet that both teams will score at least one goal.
+
+---
+**Over/Under 2.5**
+A bet on whether the total goals will be over or under 2.5 (i.e., 3+ goals or 0-2 goals).
+        """)
+
+    with st.expander("Models"):
+        st.markdown("""
+**Consensus** combines three models:
+- **ELO** (35%): Team strength ratings
+- **Poisson** (40%): Goal distribution model
+- **XGBoost** (25%): ML classifier
+
+**Value Bet** criteria:
+- Model probability > implied + 5%
+- Model confidence >= 60%
         """)
 
 fixtures = load_upcoming_fixtures(days_ahead)
