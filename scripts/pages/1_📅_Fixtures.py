@@ -402,7 +402,7 @@ for date_str, day_fixtures in fixtures_by_date.items():
     st.divider()
 
 # Value bets summary
-if total_vb > 0:
+if any(f["value_bets"] for f in fixtures):
     st.markdown("### Value Bets Summary")
 
     all_vb = []
