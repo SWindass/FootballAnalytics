@@ -6,7 +6,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet
+from app.db.models import Match, MatchAnalysis, MatchStatus, Team, TeamStats, OddsHistory, ValueBet
+from app.core.config import get_settings
+
+settings = get_settings()
 
 
 # Team colors
@@ -41,6 +44,26 @@ def load_teams():
     with SyncSessionLocal() as session:
         teams = list(session.execute(select(Team)).scalars().all())
         return {t.id: {"name": t.name, "short_name": t.short_name} for t in teams}
+
+
+@st.cache_data(ttl=60)
+def load_team_forms():
+    """Load current form (last 5 results) for all teams."""
+    from sqlalchemy import func
+    with SyncSessionLocal() as session:
+        subq = (
+            select(TeamStats.team_id, func.max(TeamStats.matchweek).label("max_mw"))
+            .where(TeamStats.season == settings.current_season)
+            .group_by(TeamStats.team_id)
+            .subquery()
+        )
+        stmt = (
+            select(TeamStats)
+            .join(subq, (TeamStats.team_id == subq.c.team_id) & (TeamStats.matchweek == subq.c.max_mw))
+            .where(TeamStats.season == settings.current_season)
+        )
+        stats = list(session.execute(stmt).scalars().all())
+        return {s.team_id: s.form for s in stats if s.form}
 
 
 @st.cache_data(ttl=60)
@@ -166,6 +189,7 @@ def main():
 
     # Load data
     teams = load_teams()
+    team_forms = load_team_forms()
 
     # Sidebar options
     st.sidebar.header("Settings")
@@ -234,7 +258,12 @@ def main():
 
                 with header_col1:
                     st.markdown(f"### {home_name} vs {away_name}")
-                    st.caption(f"Kickoff: {kickoff_time} | Matchweek {fixture['matchweek']}")
+                    home_form = team_forms.get(fixture["home_team_id"], "")
+                    away_form = team_forms.get(fixture["away_team_id"], "")
+                    if home_form or away_form:
+                        st.caption(f"Form: {home_form or '-----'} vs {away_form or '-----'} | Kickoff: {kickoff_time} | MW {fixture['matchweek']}")
+                    else:
+                        st.caption(f"Kickoff: {kickoff_time} | Matchweek {fixture['matchweek']}")
 
                 with header_col2:
                     if odds:

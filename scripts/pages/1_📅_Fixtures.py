@@ -6,7 +6,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet, EloRating
+from app.db.models import Match, MatchAnalysis, MatchStatus, Team, TeamStats, OddsHistory, ValueBet, EloRating
+from app.core.config import get_settings
+
+settings = get_settings()
 
 
 def refresh_results():
@@ -52,6 +55,26 @@ def load_teams():
     with SyncSessionLocal() as session:
         teams = list(session.execute(select(Team)).scalars().all())
         return {t.id: {"name": t.name, "short_name": t.short_name} for t in teams}
+
+
+@st.cache_data(ttl=60)
+def load_team_forms():
+    """Load current form (last 5 results) for all teams."""
+    from sqlalchemy import func
+    with SyncSessionLocal() as session:
+        subq = (
+            select(TeamStats.team_id, func.max(TeamStats.matchweek).label("max_mw"))
+            .where(TeamStats.season == settings.current_season)
+            .group_by(TeamStats.team_id)
+            .subquery()
+        )
+        stmt = (
+            select(TeamStats)
+            .join(subq, (TeamStats.team_id == subq.c.team_id) & (TeamStats.matchweek == subq.c.max_mw))
+            .where(TeamStats.season == settings.current_season)
+        )
+        stats = list(session.execute(stmt).scalars().all())
+        return {s.team_id: s.form for s in stats if s.form}
 
 
 @st.cache_data(ttl=60)
@@ -254,6 +277,7 @@ def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float)
 
 # Load data
 teams = load_teams()
+team_forms = load_team_forms()
 
 # Sidebar
 with st.sidebar:
@@ -363,14 +387,18 @@ for date_str, day_fixtures in fixtures_by_date.items():
         c1, c2, c3, c4, c5 = st.columns([2.5, 2, 0.3, 2, 0.8])
 
         with c1:
+            home_form = team_forms.get(fixture["home_team_id"], "")
+            away_form = team_forms.get(fixture["away_team_id"], "")
+            form_str = f"{home_form} v {away_form}" if home_form or away_form else ""
+
             if is_finished:
                 home_score = fixture.get("home_score", 0)
                 away_score = fixture.get("away_score", 0)
                 st.markdown(f"**{home_name}** {home_score} - {away_score} **{away_name}**")
-                st.caption(f"FT • {kickoff_time}")
+                st.caption(f"FT • {kickoff_time}" + (f" • Form: {form_str}" if form_str else ""))
             else:
                 st.markdown(f"**{home_name}** vs **{away_name}**")
-                st.caption(kickoff_time)
+                st.caption(kickoff_time + (f" • Form: {form_str}" if form_str else ""))
 
         with c2:
             st.caption("Prediction")
