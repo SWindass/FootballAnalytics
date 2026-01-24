@@ -328,7 +328,7 @@ for date_str, day_fixtures in fixtures_by_date.items():
                 st.markdown(f"**xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}**")
 
         with c3:
-            st.markdown("<div style='border-left: 2px solid #ddd; height: 80px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='border-left: 2px solid #ddd; height: 120px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
 
         with c4:
             if odds:
