@@ -1,5 +1,6 @@
 """Upcoming fixtures dashboard with predictions and value bets."""
 
+import asyncio
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
@@ -7,6 +8,51 @@ from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet, EloRating
+
+
+@st.cache_data(ttl=120, show_spinner="Fetching latest results...")
+def refresh_results():
+    """Fetch latest results from API (cached for 2 minutes)."""
+    try:
+        from batch.data_sources.football_data import FootballDataClient, parse_match
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        client = FootballDataClient()
+
+        # Fetch recent finished matches
+        date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        matches = asyncio.run(client.get_matches(
+            season=settings.current_season.split("-")[0],
+            status="FINISHED",
+            date_from=date_from,
+        ))
+
+        if not matches:
+            return 0
+
+        updated = 0
+        with SyncSessionLocal() as session:
+            for match_data in matches:
+                result = parse_match(match_data)
+
+                stmt = select(Match).where(Match.external_id == result["external_id"])
+                match = session.execute(stmt).scalar_one_or_none()
+
+                if match and (match.home_score is None or match.home_score != result.get("home_score")):
+                    match.status = MatchStatus.FINISHED
+                    match.home_score = result.get("home_score")
+                    match.away_score = result.get("away_score")
+                    match.updated_at = datetime.utcnow()
+                    updated += 1
+
+            session.commit()
+
+        return updated
+    except Exception as e:
+        # Silently fail - don't break the page if API is down
+        return 0
+
 
 # Standard color scheme
 COLORS = {
@@ -240,6 +286,9 @@ def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float)
 
     return fig
 
+
+# Refresh results from API (cached for 2 mins)
+refresh_results()
 
 # Load data
 teams = load_teams()
