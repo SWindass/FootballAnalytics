@@ -14,6 +14,7 @@ class PoissonConfig:
     home_advantage: float = 0.25  # Goals added to home team's expected
     max_goals: int = 10  # Maximum goals to consider in probability matrix
     league_avg_goals: float = 2.75  # Average goals per game in league
+    draw_inflation: float = 1.0  # Multiplier to boost draw probability (1.0 = no adjustment)
 
 
 class PoissonModel:
@@ -103,7 +104,11 @@ class PoissonModel:
         draw = np.sum(np.diag(prob_matrix))  # Diagonal
         away_win = np.sum(np.triu(prob_matrix, 1))  # Above diagonal
 
-        # Normalize (should be very close to 1 already)
+        # Apply draw inflation (Poisson systematically under-predicts draws)
+        # This is a common correction - boost draw probability and renormalize
+        draw = draw * self.config.draw_inflation
+
+        # Normalize to ensure probabilities sum to 1
         total = home_win + draw + away_win
         return home_win / total, draw / total, away_win / total
 
@@ -249,5 +254,108 @@ def calculate_team_strengths(
         defense = avg_conceded / league_avg_conceded if league_avg_conceded > 0 else 1.0
 
         strengths[team_id] = (attack, defense)
+
+    return strengths
+
+
+def calculate_home_away_strengths(
+    matches: list[dict],
+) -> dict[int, dict[str, float]]:
+    """Calculate separate home and away attack/defense strengths.
+
+    This is more accurate than combined strengths because teams
+    typically perform better at home.
+
+    Args:
+        matches: List of completed match dicts
+
+    Returns:
+        Dict mapping team_id to {
+            'home_attack': float,
+            'home_defense': float,
+            'away_attack': float,
+            'away_defense': float,
+            'home_games': int,
+            'away_games': int,
+        }
+    """
+    team_stats: dict[int, dict] = {}
+
+    # Calculate league averages for home and away separately
+    total_home_goals = 0
+    total_away_goals = 0
+    total_matches = 0
+
+    for match in matches:
+        home_score = match.get("home_score")
+        away_score = match.get("away_score")
+        if home_score is None or away_score is None:
+            continue
+
+        total_home_goals += home_score
+        total_away_goals += away_score
+        total_matches += 1
+
+        home_id = match["home_team_id"]
+        away_id = match["away_team_id"]
+
+        # Initialize stats
+        for team_id in [home_id, away_id]:
+            if team_id not in team_stats:
+                team_stats[team_id] = {
+                    "home_scored": 0,
+                    "home_conceded": 0,
+                    "home_games": 0,
+                    "away_scored": 0,
+                    "away_conceded": 0,
+                    "away_games": 0,
+                }
+
+        # Update home team stats
+        team_stats[home_id]["home_scored"] += home_score
+        team_stats[home_id]["home_conceded"] += away_score
+        team_stats[home_id]["home_games"] += 1
+
+        # Update away team stats
+        team_stats[away_id]["away_scored"] += away_score
+        team_stats[away_id]["away_conceded"] += home_score
+        team_stats[away_id]["away_games"] += 1
+
+    if total_matches == 0:
+        return {}
+
+    # League averages (per game)
+    avg_home_scored = total_home_goals / total_matches  # Avg goals by home team
+    avg_away_scored = total_away_goals / total_matches  # Avg goals by away team
+
+    # Calculate strengths
+    strengths = {}
+    for team_id, stats in team_stats.items():
+        result = {
+            "home_games": stats["home_games"],
+            "away_games": stats["away_games"],
+        }
+
+        # Home attack/defense
+        if stats["home_games"] > 0:
+            home_avg_scored = stats["home_scored"] / stats["home_games"]
+            home_avg_conceded = stats["home_conceded"] / stats["home_games"]
+            result["home_attack"] = home_avg_scored / avg_home_scored if avg_home_scored > 0 else 1.0
+            result["home_defense"] = home_avg_conceded / avg_away_scored if avg_away_scored > 0 else 1.0
+        else:
+            result["home_attack"] = 1.0
+            result["home_defense"] = 1.0
+
+        # Away attack/defense
+        if stats["away_games"] > 0:
+            away_avg_scored = stats["away_scored"] / stats["away_games"]
+            away_avg_conceded = stats["away_conceded"] / stats["away_games"]
+            result["away_attack"] = away_avg_scored / avg_away_scored if avg_away_scored > 0 else 1.0
+            result["away_defense"] = away_avg_conceded / avg_home_scored if avg_home_scored > 0 else 1.0
+        else:
+            result["away_attack"] = 1.0
+            result["away_defense"] = 1.0
+
+        strengths[team_id] = result
 
     return strengths

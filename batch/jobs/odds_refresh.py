@@ -49,6 +49,7 @@ class OddsRefreshJob:
 
             # 3. Match odds to fixtures and store
             odds_stored = self._store_odds(odds_data, teams)
+            self.session.flush()  # Ensure odds are visible for value bet detection
             logger.info(f"Stored odds for {odds_stored} matches")
 
             # 4. Detect value bets

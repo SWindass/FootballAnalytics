@@ -164,39 +164,61 @@ def match_team_names(
     Returns:
         Tuple of (home_team_id, away_team_id) or (None, None) if not matched
     """
-    # Common name mappings
-    name_mappings = {
-        "Manchester United": ["Man United", "Man Utd"],
-        "Manchester City": ["Man City"],
-        "Tottenham Hotspur": ["Tottenham", "Spurs"],
-        "Newcastle United": ["Newcastle"],
-        "West Ham United": ["West Ham"],
-        "Wolverhampton Wanderers": ["Wolves", "Wolverhampton"],
-        "Brighton and Hove Albion": ["Brighton"],
-        "Nottingham Forest": ["Nott'm Forest", "Nottm Forest"],
-        "Leicester City": ["Leicester"],
-        "Crystal Palace": ["C Palace"],
-        "AFC Bournemouth": ["Bournemouth"],
-        "Ipswich Town": ["Ipswich"],
+    # Map API team names to our database names (stripped of FC/AFC suffixes)
+    api_to_db_name = {
+        "manchester united": "manchester united",
+        "manchester city": "manchester city",
+        "tottenham hotspur": "tottenham hotspur",
+        "newcastle united": "newcastle united",
+        "west ham united": "west ham united",
+        "wolverhampton wanderers": "wolverhampton wanderers",
+        "brighton and hove albion": "brighton & hove albion",
+        "nottingham forest": "nottingham forest",
+        "leicester city": "leicester city",
+        "crystal palace": "crystal palace",
+        "afc bournemouth": "afc bournemouth",
+        "ipswich town": "ipswich town",
+        "arsenal": "arsenal",
+        "chelsea": "chelsea",
+        "liverpool": "liverpool",
+        "everton": "everton",
+        "fulham": "fulham",
+        "brentford": "brentford",
+        "aston villa": "aston villa",
+        "southampton": "southampton",
+        "luton town": "luton town",
+        "sheffield united": "sheffield united",
+        "burnley": "burnley",
     }
+
+    def normalize_name(name: str) -> str:
+        """Remove common suffixes and normalize."""
+        name = name.lower().strip()
+        for suffix in [" fc", " afc"]:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+        return name
 
     def find_team(name: str) -> Optional[int]:
         name_lower = name.lower()
+        # First check if there's an explicit mapping
+        mapped_name = api_to_db_name.get(name_lower, name_lower)
+
         for team in db_teams:
-            if (
-                team["name"].lower() == name_lower
-                or team["short_name"].lower() == name_lower
-            ):
+            db_name = normalize_name(team["name"])
+            db_short = team["short_name"].lower()
+
+            # Direct match on name (after normalization)
+            if db_name == mapped_name or db_name == name_lower:
                 return team["id"]
 
-            # Check mappings
-            for canonical, aliases in name_mappings.items():
-                if name_lower in [a.lower() for a in aliases]:
-                    if team["name"].lower() == canonical.lower():
-                        return team["id"]
-                if team["name"].lower() == canonical.lower():
-                    if name_lower in [a.lower() for a in aliases]:
-                        return team["id"]
+            # Match on short name
+            if db_short == name_lower:
+                return team["id"]
+
+            # Partial match - API name contained in DB name or vice versa
+            if name_lower in db_name or db_name in name_lower:
+                return team["id"]
 
         return None
 

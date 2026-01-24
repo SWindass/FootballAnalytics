@@ -1,53 +1,95 @@
-"""Understat scraper for xG (Expected Goals) data."""
+"""Understat scraper for xG (Expected Goals) data.
 
-import json
-import re
+Uses Playwright to render JavaScript and extract data from Understat pages.
+"""
+
+import asyncio
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-import httpx
 import structlog
-from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright, Browser, Page
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = structlog.get_logger()
 
 
 class UnderstatScraper:
-    """Scraper for Understat xG data."""
+    """Scraper for Understat xG data using Playwright."""
 
     BASE_URL = "https://understat.com"
     LEAGUE = "EPL"
 
     def __init__(self):
-        self._session: Optional[httpx.AsyncClient] = None
+        self._browser: Optional[Browser] = None
+        self._playwright = None
 
-    async def _get_session(self) -> httpx.AsyncClient:
-        if self._session is None:
-            self._session = httpx.AsyncClient(
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                },
-                timeout=30,
-            )
-        return self._session
+    async def _get_browser(self) -> Browser:
+        """Get or create browser instance."""
+        if self._browser is None:
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.launch(headless=True)
+        return self._browser
 
     async def close(self) -> None:
-        if self._session:
-            await self._session.aclose()
-            self._session = None
+        """Close browser and playwright."""
+        if self._browser:
+            await self._browser.close()
+            self._browser = None
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
 
-    def _extract_json_data(self, html: str, var_name: str) -> Any:
-        """Extract JSON data from JavaScript variable in HTML."""
-        pattern = rf"var {var_name}\s*=\s*JSON\.parse\('(.+?)'\)"
-        match = re.search(pattern, html)
-        if not match:
+    async def _load_page_with_data(self, url: str, data_var: str, timeout: int = 120000) -> Any:
+        """Load a page and extract JavaScript data.
+
+        Args:
+            url: URL to load
+            data_var: JavaScript variable name to extract
+            timeout: Page load timeout in ms (default 2 minutes)
+
+        Returns:
+            Extracted data or None
+        """
+        browser = await self._get_browser()
+        page = await browser.new_page()
+
+        try:
+            logger.info(f"Loading {url}")
+
+            # Try multiple times with increasing timeouts
+            for attempt in range(3):
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning(f"Attempt {attempt + 1} failed, retrying...")
+                        await asyncio.sleep(2)
+                    else:
+                        raise
+
+            # Wait for data to be populated by JavaScript
+            for i in range(20):
+                await page.wait_for_timeout(1000)
+                has_data = await page.evaluate(
+                    f"() => typeof {data_var} !== 'undefined' && {data_var} !== null"
+                )
+                if has_data:
+                    logger.info(f"Data loaded after {i+1} seconds")
+                    break
+
+            # Extract the data
+            data = await page.evaluate(f"() => {data_var}")
+            return data
+
+        except Exception as e:
+            logger.error(f"Error loading {url}: {e}")
             return None
 
-        # Decode escaped unicode
-        json_str = match.group(1).encode().decode("unicode_escape")
-        return json.loads(json_str)
+        finally:
+            await page.close()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def get_league_matches(self, season: str = "2024") -> list[dict[str, Any]]:
@@ -55,65 +97,47 @@ class UnderstatScraper:
 
         Args:
             season: Season start year (e.g., "2024" for 2024-25)
+
+        Returns:
+            List of match dictionaries with xG data
         """
-        session = await self._get_session()
         url = f"{self.BASE_URL}/league/{self.LEAGUE}/{season}"
+        matches = await self._load_page_with_data(url, "datesData")
 
-        response = await session.get(url)
-        response.raise_for_status()
-
-        matches_data = self._extract_json_data(response.text, "datesData")
-        if not matches_data:
-            logger.warning("Could not extract matches data from Understat")
+        if not matches:
+            logger.warning(f"Could not extract matches data for season {season}")
             return []
 
-        return matches_data
-
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def get_match_details(self, match_id: int) -> Optional[dict[str, Any]]:
-        """Get detailed xG data for a specific match."""
-        session = await self._get_session()
-        url = f"{self.BASE_URL}/match/{match_id}"
-
-        response = await session.get(url)
-        response.raise_for_status()
-
-        shots_data = self._extract_json_data(response.text, "shotsData")
-        match_info = self._extract_json_data(response.text, "match_info")
-
-        if not shots_data:
-            return None
-
-        return {
-            "match_id": match_id,
-            "match_info": match_info,
-            "shots": shots_data,
-        }
+        logger.info(f"Found {len(matches)} matches for {self.LEAGUE} {season}")
+        return matches
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def get_team_stats(self, team_name: str, season: str = "2024") -> Optional[dict[str, Any]]:
-        """Get team xG statistics for a season."""
-        session = await self._get_session()
+        """Get team xG statistics for a season.
 
+        Args:
+            team_name: Team name (e.g., "Arsenal")
+            season: Season start year
+
+        Returns:
+            Team statistics or None
+        """
         # Convert team name to URL format
         url_name = team_name.replace(" ", "_")
         url = f"{self.BASE_URL}/team/{url_name}/{season}"
 
-        try:
-            response = await session.get(url)
-            response.raise_for_status()
-        except httpx.HTTPStatusError:
+        stats = await self._load_page_with_data(url, "statisticsData")
+        matches = await self._load_page_with_data(url, "datesData")
+
+        if not stats and not matches:
             logger.warning(f"Could not fetch team data for {team_name}")
             return None
-
-        stats_data = self._extract_json_data(response.text, "statisticsData")
-        dates_data = self._extract_json_data(response.text, "datesData")
 
         return {
             "team": team_name,
             "season": season,
-            "statistics": stats_data,
-            "matches": dates_data,
+            "statistics": stats,
+            "matches": matches,
         }
 
 

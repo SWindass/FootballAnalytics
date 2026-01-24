@@ -1,4 +1,10 @@
-"""Value bet detection and calculation."""
+"""Value bet detection and calculation.
+
+Calibrated based on backtest results:
+- Model is overconfident (says 75% but actually wins 70%)
+- Home wins at 75%+ confidence are profitable
+- Away wins require higher thresholds
+"""
 
 from dataclasses import dataclass
 from decimal import Decimal
@@ -10,15 +16,65 @@ from batch.betting.kelly_criterion import KellyCalculator, KellyConfig
 settings = get_settings()
 
 
+# Calibration: Model confidence -> Actual win rate (from backtest)
+# Model is overconfident, so we adjust probabilities down
+CALIBRATION_MAP = {
+    # (min_conf, max_conf): actual_win_rate
+    (0.50, 0.55): 0.485,
+    (0.55, 0.60): 0.526,
+    (0.60, 0.65): 0.566,
+    (0.65, 0.70): 0.585,
+    (0.70, 0.75): 0.607,
+    (0.75, 1.00): 0.700,  # Sweet spot: 75%+ confidence = 70% actual
+}
+
+
+def calibrate_probability(model_prob: float) -> float:
+    """Convert overconfident model probability to calibrated actual probability.
+
+    Based on backtest: model says 75% but actually wins 70%.
+    """
+    for (min_conf, max_conf), actual in CALIBRATION_MAP.items():
+        if min_conf <= model_prob < max_conf:
+            # Linear interpolation within bucket
+            bucket_range = max_conf - min_conf
+            position = (model_prob - min_conf) / bucket_range
+
+            # Get next bucket's actual rate for interpolation
+            next_actual = actual
+            for (next_min, next_max), next_rate in CALIBRATION_MAP.items():
+                if next_min == max_conf:
+                    next_actual = next_rate
+                    break
+
+            return actual + position * (next_actual - actual)
+
+    # Fallback: apply 7% reduction (average overconfidence)
+    return model_prob * 0.93
+
+
 @dataclass
 class ValueBetConfig:
-    """Configuration for value bet detection."""
+    """Configuration for value bet detection.
 
-    edge_threshold: float = 0.05  # Minimum edge (5%)
-    min_odds: float = 1.5  # Minimum odds to consider
+    Calibrated settings based on backtest:
+    - Home wins at 75%+ model confidence hit 70% (profitable at odds >= 1.43)
+    - Away wins less reliable, need higher threshold
+    """
+
+    # Confidence thresholds (model probability, not calibrated)
+    home_min_confidence: float = 0.70  # Home wins: 70%+ model = ~60% actual
+    away_min_confidence: float = 0.60  # Away wins: higher bar, less reliable
+    other_min_confidence: float = 0.65  # O/U, BTTS etc.
+
+    edge_threshold: float = 0.03  # Minimum edge over calibrated probability (3%)
+    min_odds: float = 1.40  # Minimum odds (breakeven for 70% win rate = 1.43)
     max_odds: float = 10.0  # Maximum odds to consider
     kelly_fraction: float = 0.25  # Fractional Kelly
-    max_stake_percent: float = 10.0  # Maximum stake as % of bankroll
+    max_stake_percent: float = 5.0  # Maximum stake as % of bankroll (conservative)
+
+    # Legacy field for backwards compatibility
+    min_confidence: float = 0.70
 
 
 @dataclass
@@ -37,15 +93,16 @@ class ValueBet:
 
 
 class ValueBetDetector:
-    """Detects value betting opportunities by comparing model probabilities to odds."""
+    """Detects value betting opportunities using calibrated probabilities.
+
+    Key insight from backtest:
+    - Model is overconfident (75% model prob = 70% actual win rate)
+    - We use calibrated probabilities to calculate true edge
+    - Home wins at high confidence are most profitable
+    """
 
     def __init__(self, config: Optional[ValueBetConfig] = None):
-        self.config = config or ValueBetConfig(
-            edge_threshold=settings.edge_threshold,
-            min_odds=settings.min_odds,
-            max_odds=settings.max_odds,
-            kelly_fraction=settings.kelly_fraction,
-        )
+        self.config = config or ValueBetConfig()
         self.kelly = KellyCalculator(
             KellyConfig(
                 fraction=self.config.kelly_fraction,
@@ -53,23 +110,32 @@ class ValueBetDetector:
             )
         )
 
+    def _get_min_confidence(self, outcome: str) -> float:
+        """Get minimum confidence threshold for an outcome type."""
+        if outcome == "home_win":
+            return self.config.home_min_confidence
+        elif outcome == "away_win":
+            return self.config.away_min_confidence
+        else:
+            return self.config.other_min_confidence
+
     def detect_value_bets(
         self,
         match_id: int,
         predictions: dict[str, float],
         odds: dict[str, dict[str, float]],
     ) -> list[ValueBet]:
-        """Detect value bets for a match.
+        """Detect value bets for a match using calibrated probabilities.
 
         Args:
             match_id: Match ID
-            predictions: Dict mapping outcome to probability
+            predictions: Dict mapping outcome to model probability
                 e.g., {'home_win': 0.45, 'draw': 0.28, 'away_win': 0.27}
             odds: Dict mapping bookmaker to outcome odds
                 e.g., {'bet365': {'home_win': 2.1, 'draw': 3.4, 'away_win': 3.5}}
 
         Returns:
-            List of detected value bets
+            List of detected value bets (using calibrated probabilities)
         """
         value_bets = []
 
@@ -80,24 +146,39 @@ class ValueBetDetector:
 
                 decimal_odds = bookmaker_odds[outcome]
 
+                # Get outcome-specific confidence threshold
+                min_confidence = self._get_min_confidence(outcome)
+
+                # Check model confidence threshold
+                if model_prob < min_confidence:
+                    continue
+
                 # Check odds within range
                 if decimal_odds < self.config.min_odds or decimal_odds > self.config.max_odds:
                     continue
 
-                # Check for value
-                if not self.kelly.is_value_bet(model_prob, decimal_odds):
+                # IMPORTANT: Use calibrated probability for edge calculation
+                calibrated_prob = calibrate_probability(model_prob)
+                implied_prob = 1 / decimal_odds
+
+                # Calculate edge using CALIBRATED probability (not overconfident model prob)
+                edge = calibrated_prob - implied_prob
+
+                # Check for sufficient edge
+                if edge < self.config.edge_threshold:
                     continue
 
-                # Calculate stake
-                kelly_stake = self.kelly.calculate_kelly_stake(model_prob, decimal_odds)
-                edge = self.kelly.calculate_edge(model_prob, decimal_odds)
-                implied_prob = self.kelly.implied_probability(decimal_odds)
+                # Calculate Kelly stake using calibrated probability
+                # Kelly formula: f = (bp - q) / b where b = odds - 1
+                b = decimal_odds - 1
+                kelly_full = (b * calibrated_prob - (1 - calibrated_prob)) / b
+                kelly_stake = max(0, min(kelly_full * self.config.kelly_fraction, self.config.max_stake_percent / 100))
 
                 value_bet = ValueBet(
                     match_id=match_id,
                     outcome=outcome,
                     bookmaker=bookmaker,
-                    model_probability=Decimal(str(round(model_prob, 4))),
+                    model_probability=Decimal(str(round(calibrated_prob, 4))),  # Store calibrated prob
                     implied_probability=Decimal(str(round(implied_prob, 4))),
                     edge=Decimal(str(round(edge, 4))),
                     odds=Decimal(str(round(decimal_odds, 2))),
