@@ -320,6 +320,14 @@ for date_str, day_fixtures in fixtures_by_date.items():
                                 "Kelly": f"{float(vb.kelly_stake):.2%}",
                             })
                         st.dataframe(vb_data, use_container_width=True, hide_index=True)
+
+                    # AI Analysis narrative
+                    if analysis.narrative:
+                        st.markdown("---")
+                        st.markdown("**AI Match Preview**")
+                        st.markdown(analysis.narrative)
+                        if analysis.narrative_generated_at:
+                            st.caption(f"Generated: {analysis.narrative_generated_at.strftime('%Y-%m-%d %H:%M')}")
             else:
                 st.caption("No predictions available for this match")
 
