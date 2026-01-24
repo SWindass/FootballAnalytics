@@ -1,0 +1,12 @@
+azure-functions
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+httpx>=0.26.0
+anthropic>=0.18.0
+numpy>=1.26.3
+scipy>=1.12.0
+pandas>=2.1.4
+beautifulsoup4>=4.12.3
+tenacity>=8.2.3
+structlog>=24.1.0
+python-dotenv>=1.0.0
