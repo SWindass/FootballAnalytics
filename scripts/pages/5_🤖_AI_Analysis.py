@@ -38,7 +38,7 @@ def load_matches_with_narratives():
                 "away_crest": away.crest_url if away else None,
                 "kickoff": match.kickoff_time,
                 "venue": home.venue if home else "TBC",
-                "status": match.status.value,
+                "status": match.status.value if hasattr(match.status, 'value') else match.status,
                 "score": f"{match.home_score}-{match.away_score}" if match.home_score is not None else None,
                 "matchweek": match.matchweek,
                 "season": match.season,
@@ -117,9 +117,9 @@ filtered = matches
 if selected_mw != "All":
     filtered = [m for m in filtered if m["matchweek"] == selected_mw]
 if status_filter == "Upcoming":
-    filtered = [m for m in filtered if m["status"] == "SCHEDULED"]
+    filtered = [m for m in filtered if m["status"].upper() == "SCHEDULED"]
 elif status_filter == "Finished":
-    filtered = [m for m in filtered if m["status"] == "FINISHED"]
+    filtered = [m for m in filtered if m["status"].upper() == "FINISHED"]
 
 st.divider()
 
@@ -140,7 +140,7 @@ for match in filtered:
                 st.markdown(f"**Prediction:** {match['home_prob']:.0%} - {match['draw_prob']:.0%} - {match['away_prob']:.0%}")
 
         with header_col3:
-            if match["status"] == "SCHEDULED":
+            if match["status"].upper() == "SCHEDULED":
                 st.markdown("🟢 Upcoming")
             else:
                 st.markdown("✅ Finished")
