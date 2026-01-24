@@ -94,11 +94,16 @@ class ResultsUpdateJob:
         """Fetch recent match results from API."""
         # Get matches from last 7 days
         date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        date_to = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # Extract year from season (e.g., "2025-26" -> "2025")
+        season_year = settings.current_season.split("-")[0]
 
         matches = await self.football_client.get_matches(
-            season="2024",
+            season=season_year,
             status="FINISHED",
             date_from=date_from,
+            date_to=date_to,
         )
 
         return [parse_match(m) for m in matches]
