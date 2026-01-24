@@ -16,6 +16,22 @@ COLORS = {
     "accent": "#F9A03F",  # Orange (for highlights)
 }
 
+
+def decimal_to_fraction(decimal_odds: float) -> str:
+    """Convert decimal odds to fractional odds."""
+    from fractions import Fraction
+
+    if decimal_odds <= 1:
+        return "N/A"
+
+    # Convert to fractional: (decimal - 1) as fraction
+    frac = Fraction(decimal_odds - 1).limit_denominator(100)
+
+    if frac.denominator == 1:
+        return f"{frac.numerator}/1"
+
+    return f"{frac.numerator}/{frac.denominator}"
+
 st.set_page_config(page_title="Upcoming Fixtures", page_icon="📅", layout="wide")
 
 
@@ -266,7 +282,9 @@ for date_str, day_fixtures in fixtures_by_date.items():
 
         with c3:
             if odds:
-                st.caption(f"Odds: {float(odds.home_odds):.2f} / {float(odds.draw_odds):.2f} / {float(odds.away_odds):.2f}")
+                h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
+                st.caption(f"Odds: {h:.2f} / {d:.2f} / {a:.2f}")
+                st.caption(f"({decimal_to_fraction(h)} / {decimal_to_fraction(d)} / {decimal_to_fraction(a)})")
             if analysis and analysis.predicted_home_goals:
                 st.caption(f"xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
 
@@ -325,7 +343,9 @@ for date_str, day_fixtures in fixtures_by_date.items():
                         st.markdown("**Value Bets:**")
                         for vb in value_bets[:3]:
                             outcome = vb.outcome.replace("_", " ").title()
-                            st.markdown(f"- {outcome} @ {float(vb.odds):.2f} ({vb.bookmaker}) — {float(vb.edge):.1%} edge")
+                            odds_dec = float(vb.odds)
+                            odds_frac = decimal_to_fraction(odds_dec)
+                            st.markdown(f"- {outcome} @ {odds_dec:.2f} ({odds_frac}) via {vb.bookmaker} — {float(vb.edge):.1%} edge")
 
                 # ELO History Chart
                 home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
@@ -352,11 +372,12 @@ if total_vb > 0:
         home = teams.get(f["home_team_id"], {}).get("short_name", "?")
         away = teams.get(f["away_team_id"], {}).get("short_name", "?")
         for vb in f["value_bets"]:
+            odds_dec = float(vb.odds)
             all_vb.append({
                 "Match": f"{home} v {away}",
                 "Kick": f["kickoff"].strftime("%a %H:%M"),
                 "Bet": vb.outcome.replace("_", " ").title(),
-                "Odds": f"{float(vb.odds):.2f}",
+                "Odds": f"{odds_dec:.2f} ({decimal_to_fraction(odds_dec)})",
                 "Book": vb.bookmaker,
                 "Edge": f"{float(vb.edge):.1%}",
                 "Kelly": f"{float(vb.kelly_stake):.1%}",
