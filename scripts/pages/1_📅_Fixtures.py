@@ -327,8 +327,13 @@ for date_str, day_fixtures in fixtures_by_date.items():
         with c3:
             if odds:
                 h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
-                st.caption(f"H: {decimal_to_fraction(h)}  •  D: {decimal_to_fraction(d)}  •  A: {decimal_to_fraction(a)}")
-                st.caption(f"({h:.2f} • {d:.2f} • {a:.2f})")
+                odds_df = {
+                    "": ["Frac", "Dec"],
+                    "Home": [decimal_to_fraction(h), f"{h:.2f}"],
+                    "Draw": [decimal_to_fraction(d), f"{d:.2f}"],
+                    "Away": [decimal_to_fraction(a), f"{a:.2f}"],
+                }
+                st.dataframe(odds_df, hide_index=True, height=107)
             if analysis and analysis.predicted_home_goals:
                 st.caption(f"xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
 
