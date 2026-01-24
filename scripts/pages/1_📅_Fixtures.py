@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet
+from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet, EloRating
 
 # Standard color scheme
 COLORS = {
@@ -64,6 +64,7 @@ def load_upcoming_fixtures(days: int = 7):
 
             fixtures.append({
                 "id": match.id,
+                "season": match.season,
                 "matchweek": match.matchweek,
                 "kickoff": match.kickoff_time,
                 "home_team_id": match.home_team_id,
@@ -74,6 +75,57 @@ def load_upcoming_fixtures(days: int = 7):
             })
 
         return fixtures
+
+
+@st.cache_data(ttl=300)
+def load_elo_history(team_id: int, season: str):
+    """Load ELO rating history for a team."""
+    with SyncSessionLocal() as session:
+        stmt = (
+            select(EloRating)
+            .where(EloRating.team_id == team_id)
+            .where(EloRating.season == season)
+            .order_by(EloRating.matchweek)
+        )
+        ratings = list(session.execute(stmt).scalars().all())
+        return [{"matchweek": r.matchweek, "rating": float(r.rating)} for r in ratings]
+
+
+def render_elo_chart(home_elo: list, away_elo: list, home_name: str, away_name: str):
+    """Render ELO history chart for two teams."""
+    fig = go.Figure()
+
+    if home_elo:
+        fig.add_trace(go.Scatter(
+            x=[e["matchweek"] for e in home_elo],
+            y=[e["rating"] for e in home_elo],
+            mode='lines+markers',
+            name=home_name,
+            line=dict(color=COLORS["home"], width=2),
+            marker=dict(size=5),
+        ))
+
+    if away_elo:
+        fig.add_trace(go.Scatter(
+            x=[e["matchweek"] for e in away_elo],
+            y=[e["rating"] for e in away_elo],
+            mode='lines+markers',
+            name=away_name,
+            line=dict(color=COLORS["away"], width=2),
+            marker=dict(size=5),
+        ))
+
+    fig.update_layout(
+        height=200,
+        margin=dict(l=0, r=0, t=30, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        xaxis=dict(title="Matchweek", dtick=5),
+        yaxis=dict(title="ELO"),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    )
+
+    return fig
 
 
 def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float):
@@ -274,6 +326,15 @@ for date_str, day_fixtures in fixtures_by_date.items():
                         for vb in value_bets[:3]:
                             outcome = vb.outcome.replace("_", " ").title()
                             st.markdown(f"- {outcome} @ {float(vb.odds):.2f} ({vb.bookmaker}) — {float(vb.edge):.1%} edge")
+
+                # ELO History Chart
+                home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
+                away_elo = load_elo_history(fixture["away_team_id"], fixture["season"])
+                if home_elo or away_elo:
+                    st.markdown("---")
+                    st.markdown("**ELO Rating History**")
+                    elo_fig = render_elo_chart(home_elo, away_elo, home_name, away_name)
+                    st.plotly_chart(elo_fig, use_container_width=True, key=f"elo_{fixture['id']}")
 
                 # AI Narrative
                 if analysis.narrative:
