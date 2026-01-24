@@ -8,32 +8,13 @@ from sqlalchemy import select
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet
 
-
-# Team colors
-TEAM_COLORS = {
-    "Liverpool": "#C8102E",
-    "Man City": "#6CABDD",
-    "Arsenal": "#EF0107",
-    "Chelsea": "#034694",
-    "Tottenham": "#132257",
-    "Man United": "#DA291C",
-    "Aston Villa": "#95BFE5",
-    "Newcastle": "#241F20",
-    "Brighton Hove": "#0057B8",
-    "West Ham": "#7A263A",
-    "Crystal Palace": "#1B458F",
-    "Fulham": "#CC0000",
-    "Brentford": "#E30613",
-    "Nottingham": "#DD0000",
-    "Bournemouth": "#B50E12",
-    "Wolverhampton": "#FDB913",
-    "Everton": "#003399",
-    "Leicester City": "#003090",
-    "Southampton": "#D71920",
-    "Ipswich Town": "#0033A0",
-    "Leeds United": "#FFCD00",
+# Standard color scheme
+COLORS = {
+    "home": "#2E86AB",    # Blue
+    "draw": "#A0A0A0",    # Gray
+    "away": "#E94F37",    # Red
+    "accent": "#F9A03F",  # Orange (for highlights)
 }
-
 
 st.set_page_config(page_title="Upcoming Fixtures", page_icon="📅", layout="wide")
 
@@ -63,12 +44,10 @@ def load_upcoming_fixtures(days: int = 7):
 
         fixtures = []
         for match in matches:
-            # Get analysis
             analysis = session.execute(
                 select(MatchAnalysis).where(MatchAnalysis.match_id == match.id)
             ).scalar_one_or_none()
 
-            # Get best odds
             odds = session.execute(
                 select(OddsHistory)
                 .where(OddsHistory.match_id == match.id)
@@ -76,7 +55,6 @@ def load_upcoming_fixtures(days: int = 7):
                 .limit(1)
             ).scalar_one_or_none()
 
-            # Get value bets
             value_bets = list(session.execute(
                 select(ValueBet)
                 .where(ValueBet.match_id == match.id)
@@ -98,57 +76,52 @@ def load_upcoming_fixtures(days: int = 7):
         return fixtures
 
 
-def get_team_color(short_name: str) -> str:
-    """Get color for a team."""
-    return TEAM_COLORS.get(short_name, "#888888")
-
-
-def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float, home_name: str, away_name: str):
-    """Render a horizontal probability bar."""
+def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float):
+    """Render a compact horizontal probability bar."""
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        y=["Probability"],
+        y=[""],
         x=[home_prob * 100],
         orientation='h',
-        name=home_name,
-        marker_color=get_team_color(home_name),
-        text=f"{home_prob:.0%}",
+        name="Home",
+        marker_color=COLORS["home"],
+        text=f"H {home_prob:.0%}",
         textposition='inside',
-        insidetextanchor='middle',
-        hovertemplate=f"{home_name} Win: {home_prob:.1%}<extra></extra>",
+        textfont=dict(color='white', size=11),
+        hovertemplate=f"Home: {home_prob:.1%}<extra></extra>",
     ))
 
     fig.add_trace(go.Bar(
-        y=["Probability"],
+        y=[""],
         x=[draw_prob * 100],
         orientation='h',
         name="Draw",
-        marker_color="#888888",
-        text=f"{draw_prob:.0%}",
+        marker_color=COLORS["draw"],
+        text=f"D {draw_prob:.0%}",
         textposition='inside',
-        insidetextanchor='middle',
+        textfont=dict(color='white', size=11),
         hovertemplate=f"Draw: {draw_prob:.1%}<extra></extra>",
     ))
 
     fig.add_trace(go.Bar(
-        y=["Probability"],
+        y=[""],
         x=[away_prob * 100],
         orientation='h',
-        name=away_name,
-        marker_color=get_team_color(away_name),
-        text=f"{away_prob:.0%}",
+        name="Away",
+        marker_color=COLORS["away"],
+        text=f"A {away_prob:.0%}",
         textposition='inside',
-        insidetextanchor='middle',
-        hovertemplate=f"{away_name} Win: {away_prob:.1%}<extra></extra>",
+        textfont=dict(color='white', size=11),
+        hovertemplate=f"Away: {away_prob:.1%}<extra></extra>",
     ))
 
     fig.update_layout(
         barmode='stack',
-        height=60,
+        height=35,
         margin=dict(l=0, r=0, t=0, b=0),
         showlegend=False,
-        xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+        xaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 100]),
         yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
@@ -158,16 +131,23 @@ def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float,
 
 
 # Main content
-st.title("📅 Upcoming Fixtures & Predictions")
-st.markdown("Match predictions and value betting opportunities for the upcoming week.")
+st.title("📅 Fixtures & Predictions")
 
 # Load data
 teams = load_teams()
 
-# Sidebar options
-st.sidebar.header("Settings")
-days_ahead = st.sidebar.slider("Days ahead", 1, 14, 7)
-show_all_odds = st.sidebar.checkbox("Show all bookmaker odds", False)
+# Sidebar
+with st.sidebar:
+    days_ahead = st.slider("Days ahead", 1, 14, 7)
+
+    with st.expander("About"):
+        st.markdown("""
+        **Models:** ELO (35%) + Poisson (40%) + XGBoost (25%)
+
+        **Value Bet:** Model prob > implied + 5%
+
+        **Kelly:** 0.25 fractional for risk management
+        """)
 
 fixtures = load_upcoming_fixtures(days_ahead)
 
@@ -175,239 +155,164 @@ if not fixtures:
     st.info("No upcoming fixtures found.")
     st.stop()
 
-# Summary metrics
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Fixtures", len(fixtures))
+# Compact summary
+total_vb = sum(len(f["value_bets"]) for f in fixtures)
+with_pred = sum(1 for f in fixtures if f["analysis"] and f["analysis"].consensus_home_prob)
+cols = st.columns(4)
+cols[0].metric("Fixtures", len(fixtures))
+cols[1].metric("Value Bets", total_vb)
+cols[2].metric("Predictions", f"{with_pred}/{len(fixtures)}")
 
-total_value_bets = sum(len(f["value_bets"]) for f in fixtures)
-col2.metric("Value Bets", total_value_bets)
-
-with_predictions = sum(1 for f in fixtures if f["analysis"] and f["analysis"].consensus_home_prob)
-col3.metric("With Predictions", f"{with_predictions}/{len(fixtures)}")
-
-# Highest edge
 max_edge = 0
-max_edge_match = ""
 for f in fixtures:
     if f["value_bets"]:
         edge = float(f["value_bets"][0].edge)
         if edge > max_edge:
             max_edge = edge
-            home = teams.get(f["home_team_id"], {}).get("short_name", "?")
-            away = teams.get(f["away_team_id"], {}).get("short_name", "?")
-            max_edge_match = f"{home} vs {away}"
-
-col4.metric("Best Edge", f"{max_edge:.1%}" if max_edge > 0 else "N/A", max_edge_match if max_edge > 0 else None)
+cols[3].metric("Best Edge", f"{max_edge:.1%}" if max_edge > 0 else "-")
 
 st.divider()
 
-# Group fixtures by date
+# Group by date
 fixtures_by_date = {}
 for f in fixtures:
-    date_str = f["kickoff"].strftime("%A, %B %d")
+    date_str = f["kickoff"].strftime("%a %d %b")
     if date_str not in fixtures_by_date:
         fixtures_by_date[date_str] = []
     fixtures_by_date[date_str].append(f)
 
-# Render each day
+# Render fixtures
 for date_str, day_fixtures in fixtures_by_date.items():
-    st.subheader(f"{date_str}")
+    st.markdown(f"**{date_str}**")
 
     for fixture in day_fixtures:
         home = teams.get(fixture["home_team_id"], {})
         away = teams.get(fixture["away_team_id"], {})
-        home_name = home.get("short_name", "Unknown")
-        away_name = away.get("short_name", "Unknown")
+        home_name = home.get("short_name", "?")
+        away_name = away.get("short_name", "?")
         kickoff_time = fixture["kickoff"].strftime("%H:%M")
 
         analysis = fixture["analysis"]
         odds = fixture["odds"]
         value_bets = fixture["value_bets"]
 
-        # Match card
-        with st.container():
-            # Header row
-            header_col1, header_col2, header_col3 = st.columns([2, 1, 1])
+        # Compact match row
+        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
 
-            with header_col1:
-                st.markdown(f"### {home_name} vs {away_name}")
-                st.caption(f"Kickoff: {kickoff_time} | Matchweek {fixture['matchweek']}")
+        with c1:
+            st.markdown(f"**{home_name}** vs **{away_name}**")
+            st.caption(f"{kickoff_time} | MW{fixture['matchweek']}")
 
-            with header_col2:
-                if odds:
-                    st.markdown("**Best Odds**")
-                    st.text(f"H: {float(odds.home_odds):.2f}  D: {float(odds.draw_odds):.2f}  A: {float(odds.away_odds):.2f}")
-
-            with header_col3:
-                if value_bets:
-                    best_vb = value_bets[0]
-                    st.markdown(f"**Value Bet**")
-                    outcome_display = best_vb.outcome.replace("_", " ").title()
-                    st.text(f"{outcome_display} @ {float(best_vb.odds):.2f}")
-                    st.caption(f"Edge: {float(best_vb.edge):.1%}")
-
-            # Predictions
+        with c2:
             if analysis and analysis.consensus_home_prob:
-                home_prob = float(analysis.consensus_home_prob)
-                draw_prob = float(analysis.consensus_draw_prob)
-                away_prob = float(analysis.consensus_away_prob)
-
-                # Probability bar
-                prob_fig = render_probability_bar(home_prob, draw_prob, away_prob, home_name, away_name)
+                prob_fig = render_probability_bar(
+                    float(analysis.consensus_home_prob),
+                    float(analysis.consensus_draw_prob),
+                    float(analysis.consensus_away_prob)
+                )
                 st.plotly_chart(prob_fig, use_container_width=True, key=f"prob_{fixture['id']}")
 
-                # Detailed predictions in expander
-                with st.expander("View detailed predictions"):
-                    detail_cols = st.columns(4)
+        with c3:
+            if odds:
+                st.caption(f"Odds: {float(odds.home_odds):.2f} / {float(odds.draw_odds):.2f} / {float(odds.away_odds):.2f}")
+            if analysis and analysis.predicted_home_goals:
+                st.caption(f"xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
 
-                    # Consensus
-                    with detail_cols[0]:
-                        st.markdown("**Consensus**")
-                        st.text(f"Home: {home_prob:.1%}")
-                        st.text(f"Draw: {draw_prob:.1%}")
-                        st.text(f"Away: {away_prob:.1%}")
+        with c4:
+            if value_bets:
+                best = value_bets[0]
+                st.markdown(f"**{float(best.edge):.0%}** edge")
 
-                    # ELO
-                    with detail_cols[1]:
-                        if analysis.elo_home_prob:
-                            st.markdown("**ELO Model**")
-                            st.text(f"Home: {float(analysis.elo_home_prob):.1%}")
-                            st.text(f"Draw: {float(analysis.elo_draw_prob):.1%}")
-                            st.text(f"Away: {float(analysis.elo_away_prob):.1%}")
+        # Expandable details
+        if analysis and analysis.consensus_home_prob:
+            with st.expander("Details", expanded=False):
+                # Model comparison in compact table
+                model_data = []
+                if analysis.elo_home_prob:
+                    model_data.append({
+                        "Model": "ELO",
+                        "Home": f"{float(analysis.elo_home_prob):.0%}",
+                        "Draw": f"{float(analysis.elo_draw_prob):.0%}",
+                        "Away": f"{float(analysis.elo_away_prob):.0%}",
+                    })
+                if analysis.poisson_home_prob:
+                    model_data.append({
+                        "Model": "Poisson",
+                        "Home": f"{float(analysis.poisson_home_prob):.0%}",
+                        "Draw": f"{float(analysis.poisson_draw_prob):.0%}",
+                        "Away": f"{float(analysis.poisson_away_prob):.0%}",
+                    })
+                if analysis.xgboost_home_prob:
+                    model_data.append({
+                        "Model": "XGBoost",
+                        "Home": f"{float(analysis.xgboost_home_prob):.0%}",
+                        "Draw": f"{float(analysis.xgboost_draw_prob):.0%}",
+                        "Away": f"{float(analysis.xgboost_away_prob):.0%}",
+                    })
+                model_data.append({
+                    "Model": "**Consensus**",
+                    "Home": f"**{float(analysis.consensus_home_prob):.0%}**",
+                    "Draw": f"**{float(analysis.consensus_draw_prob):.0%}**",
+                    "Away": f"**{float(analysis.consensus_away_prob):.0%}**",
+                })
 
-                    # Poisson
-                    with detail_cols[2]:
-                        if analysis.poisson_home_prob:
-                            st.markdown("**Poisson Model**")
-                            st.text(f"Home: {float(analysis.poisson_home_prob):.1%}")
-                            st.text(f"Draw: {float(analysis.poisson_draw_prob):.1%}")
-                            st.text(f"Away: {float(analysis.poisson_away_prob):.1%}")
-                            if analysis.predicted_home_goals and analysis.predicted_away_goals:
-                                st.caption(f"xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.dataframe(model_data, use_container_width=True, hide_index=True)
 
-                    # XGBoost
-                    with detail_cols[3]:
-                        if analysis.xgboost_home_prob:
-                            st.markdown("**XGBoost Model**")
-                            st.text(f"Home: {float(analysis.xgboost_home_prob):.1%}")
-                            st.text(f"Draw: {float(analysis.xgboost_draw_prob):.1%}")
-                            st.text(f"Away: {float(analysis.xgboost_away_prob):.1%}")
+                with col2:
+                    extras = []
+                    if analysis.poisson_over_2_5_prob:
+                        extras.append(f"Over 2.5: {float(analysis.poisson_over_2_5_prob):.0%}")
+                    if analysis.poisson_btts_prob:
+                        extras.append(f"BTTS: {float(analysis.poisson_btts_prob):.0%}")
+                    if extras:
+                        st.markdown(" | ".join(extras))
 
-                    # O/U and BTTS
-                    if analysis.poisson_over_2_5_prob or analysis.poisson_btts_prob:
-                        st.markdown("---")
-                        ou_cols = st.columns(2)
-                        with ou_cols[0]:
-                            if analysis.poisson_over_2_5_prob:
-                                st.markdown(f"**Over 2.5 Goals:** {float(analysis.poisson_over_2_5_prob):.1%}")
-                        with ou_cols[1]:
-                            if analysis.poisson_btts_prob:
-                                st.markdown(f"**BTTS:** {float(analysis.poisson_btts_prob):.1%}")
-
-                    # Value bets for this match
                     if value_bets:
-                        st.markdown("---")
-                        st.markdown("**All Value Bets**")
-                        vb_data = []
-                        for vb in value_bets[:5]:  # Show top 5
-                            vb_data.append({
-                                "Outcome": vb.outcome.replace("_", " ").title(),
-                                "Bookmaker": vb.bookmaker,
-                                "Odds": f"{float(vb.odds):.2f}",
-                                "Model": f"{float(vb.model_probability):.1%}",
-                                "Implied": f"{float(vb.implied_probability):.1%}",
-                                "Edge": f"{float(vb.edge):.1%}",
-                                "Kelly": f"{float(vb.kelly_stake):.2%}",
-                            })
-                        st.dataframe(vb_data, use_container_width=True, hide_index=True)
+                        st.markdown("**Value Bets:**")
+                        for vb in value_bets[:3]:
+                            outcome = vb.outcome.replace("_", " ").title()
+                            st.markdown(f"- {outcome} @ {float(vb.odds):.2f} ({vb.bookmaker}) — {float(vb.edge):.1%} edge")
 
-                    # AI Analysis narrative
-                    if analysis.narrative:
-                        st.markdown("---")
-                        st.markdown("**AI Match Preview**")
-                        st.markdown(analysis.narrative)
-                        if analysis.narrative_generated_at:
-                            st.caption(f"Generated: {analysis.narrative_generated_at.strftime('%Y-%m-%d %H:%M')}")
-            else:
-                st.caption("No predictions available for this match")
+                # AI Narrative
+                if analysis.narrative:
+                    st.markdown("---")
+                    st.markdown(analysis.narrative)
 
-            st.divider()
+    st.divider()
 
-# Value Bets Summary
-st.subheader("All Value Bets This Week")
+# Value bets summary
+if total_vb > 0:
+    st.markdown("### Value Bets Summary")
 
-all_value_bets = []
-for f in fixtures:
-    home = teams.get(f["home_team_id"], {}).get("short_name", "?")
-    away = teams.get(f["away_team_id"], {}).get("short_name", "?")
-    match_str = f"{home} vs {away}"
+    all_vb = []
+    for f in fixtures:
+        home = teams.get(f["home_team_id"], {}).get("short_name", "?")
+        away = teams.get(f["away_team_id"], {}).get("short_name", "?")
+        for vb in f["value_bets"]:
+            all_vb.append({
+                "Match": f"{home} v {away}",
+                "Kick": f["kickoff"].strftime("%a %H:%M"),
+                "Bet": vb.outcome.replace("_", " ").title(),
+                "Odds": f"{float(vb.odds):.2f}",
+                "Book": vb.bookmaker,
+                "Edge": f"{float(vb.edge):.1%}",
+                "Kelly": f"{float(vb.kelly_stake):.1%}",
+            })
 
-    for vb in f["value_bets"]:
-        all_value_bets.append({
-            "match": match_str,
-            "kickoff": f["kickoff"],
-            "outcome": vb.outcome,
-            "bookmaker": vb.bookmaker,
-            "odds": float(vb.odds),
-            "model_prob": float(vb.model_probability),
-            "implied_prob": float(vb.implied_probability),
-            "edge": float(vb.edge),
-            "kelly": float(vb.kelly_stake),
-        })
+    all_vb.sort(key=lambda x: float(x["Edge"].rstrip("%")), reverse=True)
 
-if all_value_bets:
-    # Sort by edge
-    all_value_bets.sort(key=lambda x: x["edge"], reverse=True)
-
-    # Show only best per match/outcome
+    # Dedupe by match+bet
     seen = set()
-    unique_bets = []
-    for vb in all_value_bets:
-        key = (vb["match"], vb["outcome"])
+    unique = []
+    for vb in all_vb:
+        key = (vb["Match"], vb["Bet"])
         if key not in seen:
             seen.add(key)
-            unique_bets.append(vb)
+            unique.append(vb)
 
-    display_data = []
-    for vb in unique_bets:
-        display_data.append({
-            "Match": vb["match"],
-            "Kickoff": vb["kickoff"].strftime("%a %H:%M"),
-            "Bet": vb["outcome"].replace("_", " ").title(),
-            "Best Odds": f"{vb['odds']:.2f}",
-            "Bookmaker": vb["bookmaker"],
-            "Model": f"{vb['model_prob']:.1%}",
-            "Implied": f"{vb['implied_prob']:.1%}",
-            "Edge": f"{vb['edge']:.1%}",
-            "Kelly Stake": f"{vb['kelly']:.2%}",
-        })
+    st.dataframe(unique, use_container_width=True, hide_index=True)
 
-    st.dataframe(display_data, use_container_width=True, hide_index=True)
-
-    # Kelly summary
-    total_kelly = sum(vb["kelly"] for vb in unique_bets)
-    st.info(f"**Total Kelly allocation:** {total_kelly:.1%} of bankroll across {len(unique_bets)} bets")
-else:
-    st.info("No value bets found for upcoming fixtures. Run `python batch/jobs/odds_refresh.py` to detect value bets.")
-
-# Sidebar info
-with st.sidebar.expander("About Predictions"):
-    st.markdown("""
-    **Consensus Model**
-
-    Combines three models:
-    - **ELO** (35%): Team strength ratings
-    - **Poisson** (40%): Goal distribution model
-    - **XGBoost** (25%): ML classifier
-
-    **Value Bets**
-
-    A bet is flagged when:
-    - Model probability > implied probability + 5%
-    - Model confidence >= 60%
-
-    **Kelly Criterion**
-
-    Recommended stake based on edge and odds.
-    Using 0.25 fractional Kelly for risk management.
-    """)
+    total_kelly = sum(float(vb["Kelly"].rstrip("%")) for vb in unique)
+    st.caption(f"Total Kelly: {total_kelly:.1f}% across {len(unique)} bets")
