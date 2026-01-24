@@ -327,6 +327,7 @@ for date_str, day_fixtures in fixtures_by_date.items():
         with c3:
             if odds:
                 h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
+                st.caption("Best Odds")
                 odds_df = {
                     "": ["Frac", "Dec"],
                     "Home": [decimal_to_fraction(h), f"{h:.2f}"],
