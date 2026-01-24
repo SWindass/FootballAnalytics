@@ -44,16 +44,49 @@ def load_teams():
 
 
 @st.cache_data(ttl=60)
-def load_upcoming_fixtures(days: int = 7):
-    """Load upcoming fixtures with predictions."""
+def get_current_matchweek():
+    """Get the current matchweek number."""
     with SyncSessionLocal() as session:
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        # Find the matchweek with the most recent/upcoming matches
         now = datetime.now(timezone.utc)
+
+        # First try to find a matchweek with scheduled matches
+        stmt = (
+            select(Match.matchweek)
+            .where(Match.season == settings.current_season)
+            .where(Match.status == MatchStatus.SCHEDULED)
+            .order_by(Match.kickoff_time)
+            .limit(1)
+        )
+        result = session.execute(stmt).scalar_one_or_none()
+
+        if result:
+            return result
+
+        # Otherwise get the latest matchweek
+        stmt = (
+            select(Match.matchweek)
+            .where(Match.season == settings.current_season)
+            .order_by(Match.matchweek.desc())
+            .limit(1)
+        )
+        return session.execute(stmt).scalar_one_or_none() or 1
+
+
+@st.cache_data(ttl=60)
+def load_matchweek_fixtures(matchweek: int):
+    """Load all fixtures for a matchweek (completed and upcoming)."""
+    with SyncSessionLocal() as session:
+        from app.core.config import get_settings
+        settings = get_settings()
 
         stmt = (
             select(Match)
-            .where(Match.status == MatchStatus.SCHEDULED)
-            .where(Match.kickoff_time > now)
-            .where(Match.kickoff_time < now + timedelta(days=days))
+            .where(Match.season == settings.current_season)
+            .where(Match.matchweek == matchweek)
             .order_by(Match.kickoff_time)
         )
         matches = list(session.execute(stmt).scalars().all())
@@ -78,6 +111,13 @@ def load_upcoming_fixtures(days: int = 7):
                 .order_by(ValueBet.edge.desc())
             ).scalars().all())
 
+            # Determine status
+            status = match.status if hasattr(match.status, 'value') else match.status
+            if isinstance(status, str):
+                is_finished = status.upper() == "FINISHED"
+            else:
+                is_finished = status == MatchStatus.FINISHED
+
             fixtures.append({
                 "id": match.id,
                 "season": match.season,
@@ -85,6 +125,9 @@ def load_upcoming_fixtures(days: int = 7):
                 "kickoff": match.kickoff_time,
                 "home_team_id": match.home_team_id,
                 "away_team_id": match.away_team_id,
+                "home_score": match.home_score,
+                "away_score": match.away_score,
+                "is_finished": is_finished,
                 "analysis": analysis,
                 "odds": odds,
                 "value_bets": value_bets,
@@ -203,8 +246,6 @@ teams = load_teams()
 
 # Sidebar
 with st.sidebar:
-    days_ahead = st.slider("Days ahead", 1, 14, 7)
-
     with st.expander("Glossary", expanded=False):
         st.markdown("""
 **Edge**
@@ -258,14 +299,14 @@ A bet on whether the total goals will be over or under 2.5 (i.e., 3+ goals or 0-
 - Model confidence >= 60%
         """)
 
-fixtures = load_upcoming_fixtures(days_ahead)
+# Get current matchweek and load fixtures
+current_mw = get_current_matchweek()
+fixtures = load_matchweek_fixtures(current_mw)
 
 if not fixtures:
-    st.info("No upcoming fixtures found.")
+    st.info("No fixtures found for this matchweek.")
     st.stop()
 
-# Get matchweek from first fixture
-current_mw = fixtures[0]["matchweek"] if fixtures else "?"
 st.title(f"Fixtures - Match Week {current_mw}")
 
 # Group by date
@@ -291,12 +332,20 @@ for date_str, day_fixtures in fixtures_by_date.items():
         odds = fixture["odds"]
         value_bets = fixture["value_bets"]
 
+        is_finished = fixture.get("is_finished", False)
+
         # Compact match row
         c1, c2, c3, c4, c5 = st.columns([2.5, 2, 0.3, 2, 0.8])
 
         with c1:
-            st.markdown(f"**{home_name}** vs **{away_name}**")
-            st.caption(kickoff_time)
+            if is_finished:
+                home_score = fixture.get("home_score", 0)
+                away_score = fixture.get("away_score", 0)
+                st.markdown(f"**{home_name}** {home_score} - {away_score} **{away_name}**")
+                st.caption(f"FT • {kickoff_time}")
+            else:
+                st.markdown(f"**{home_name}** vs **{away_name}**")
+                st.caption(kickoff_time)
 
         with c2:
             st.caption("Prediction")
@@ -314,7 +363,19 @@ for date_str, day_fixtures in fixtures_by_date.items():
             st.markdown("<div style='border-left: 2px solid #ddd; height: 100px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
 
         with c4:
-            if odds:
+            if is_finished:
+                # Show result summary for finished matches
+                home_score = fixture.get("home_score", 0)
+                away_score = fixture.get("away_score", 0)
+                if home_score > away_score:
+                    result = f"{home_name} Win"
+                elif away_score > home_score:
+                    result = f"{away_name} Win"
+                else:
+                    result = "Draw"
+                st.caption("Result")
+                st.markdown(f"**{result}**")
+            elif odds:
                 h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
                 st.caption("Best Odds")
                 odds_df = {
@@ -326,7 +387,23 @@ for date_str, day_fixtures in fixtures_by_date.items():
                 st.dataframe(odds_df, hide_index=True, height=107)
 
         with c5:
-            if value_bets:
+            if is_finished:
+                # Show if prediction was correct
+                if analysis and analysis.consensus_home_prob:
+                    home_score = fixture.get("home_score", 0)
+                    away_score = fixture.get("away_score", 0)
+                    home_prob = float(analysis.consensus_home_prob)
+                    draw_prob = float(analysis.consensus_draw_prob)
+                    away_prob = float(analysis.consensus_away_prob)
+
+                    predicted = "home" if home_prob > draw_prob and home_prob > away_prob else ("away" if away_prob > draw_prob else "draw")
+                    actual = "home" if home_score > away_score else ("away" if away_score > home_score else "draw")
+
+                    if predicted == actual:
+                        st.markdown("✅")
+                    else:
+                        st.markdown("❌")
+            elif value_bets:
                 best = value_bets[0]
                 st.caption("Value")
                 st.markdown(f"**{float(best.edge):.0%}** edge")
