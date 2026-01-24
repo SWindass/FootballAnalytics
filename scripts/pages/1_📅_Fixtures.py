@@ -1,6 +1,5 @@
 """Upcoming fixtures dashboard with predictions and value bets."""
 
-import asyncio
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
@@ -10,48 +9,14 @@ from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus, Team, OddsHistory, ValueBet, EloRating
 
 
-@st.cache_data(ttl=120, show_spinner="Fetching latest results...")
 def refresh_results():
-    """Fetch latest results from API (cached for 2 minutes)."""
+    """Fetch latest results from API."""
     try:
-        from batch.data_sources.football_data import FootballDataClient, parse_match
-        from app.core.config import get_settings
-
-        settings = get_settings()
-        client = FootballDataClient()
-
-        # Fetch recent finished matches
-        date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
-        matches = asyncio.run(client.get_matches(
-            season=settings.current_season.split("-")[0],
-            status="FINISHED",
-            date_from=date_from,
-        ))
-
-        if not matches:
-            return 0
-
-        updated = 0
-        with SyncSessionLocal() as session:
-            for match_data in matches:
-                result = parse_match(match_data)
-
-                stmt = select(Match).where(Match.external_id == result["external_id"])
-                match = session.execute(stmt).scalar_one_or_none()
-
-                if match and (match.home_score is None or match.home_score != result.get("home_score")):
-                    match.status = MatchStatus.FINISHED
-                    match.home_score = result.get("home_score")
-                    match.away_score = result.get("away_score")
-                    match.updated_at = datetime.utcnow()
-                    updated += 1
-
-            session.commit()
-
-        return updated
+        from batch.jobs.results_update import run_results_update
+        result = run_results_update()
+        return result.get("matches_updated", 0)
     except Exception as e:
-        # Silently fail - don't break the page if API is down
-        return 0
+        return f"Error: {e}"
 
 
 # Standard color scheme
@@ -287,14 +252,25 @@ def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float)
     return fig
 
 
-# Refresh results from API (cached for 2 mins)
-refresh_results()
-
 # Load data
 teams = load_teams()
 
 # Sidebar
 with st.sidebar:
+    if st.button("🔄 Refresh Results", use_container_width=True):
+        with st.spinner("Fetching latest results..."):
+            result = refresh_results()
+            if isinstance(result, int):
+                if result > 0:
+                    st.success(f"Updated {result} matches")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.info("No new results")
+            else:
+                st.error(result)
+
+    st.divider()
     with st.expander("Glossary", expanded=False):
         st.markdown("""
 **Edge**
