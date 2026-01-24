@@ -309,13 +309,14 @@ for date_str, day_fixtures in fixtures_by_date.items():
         value_bets = fixture["value_bets"]
 
         # Compact match row
-        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+        c1, c2, c3, c4, c5 = st.columns([3, 2, 1, 2, 1])
 
         with c1:
             st.markdown(f"**{home_name}** vs **{away_name}**")
             st.caption(f"{kickoff_time} | MW{fixture['matchweek']}")
 
         with c2:
+            st.caption("Prediction")
             if analysis and analysis.consensus_home_prob:
                 prob_fig = render_probability_bar(
                     float(analysis.consensus_home_prob),
@@ -323,8 +324,13 @@ for date_str, day_fixtures in fixtures_by_date.items():
                     float(analysis.consensus_away_prob)
                 )
                 st.plotly_chart(prob_fig, use_container_width=True, key=f"prob_{fixture['id']}")
+            if analysis and analysis.predicted_home_goals:
+                st.markdown(f"**xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}**")
 
         with c3:
+            st.markdown("<div style='border-left: 2px solid #ddd; height: 80px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
+
+        with c4:
             if odds:
                 h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
                 st.caption("Best Odds")
@@ -335,12 +341,11 @@ for date_str, day_fixtures in fixtures_by_date.items():
                     "Away": [decimal_to_fraction(a), f"{a:.2f}"],
                 }
                 st.dataframe(odds_df, hide_index=True, height=107)
-            if analysis and analysis.predicted_home_goals:
-                st.caption(f"xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
 
-        with c4:
+        with c5:
             if value_bets:
                 best = value_bets[0]
+                st.caption("Value")
                 st.markdown(f"**{float(best.edge):.0%}** edge")
 
         # Expandable details
