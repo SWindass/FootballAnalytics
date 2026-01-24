@@ -327,8 +327,8 @@ for date_str, day_fixtures in fixtures_by_date.items():
         with c3:
             if odds:
                 h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
-                st.caption(f"Odds: {h:.2f} / {d:.2f} / {a:.2f}")
-                st.caption(f"({decimal_to_fraction(h)} / {decimal_to_fraction(d)} / {decimal_to_fraction(a)})")
+                st.caption(f"H: {decimal_to_fraction(h)}  •  D: {decimal_to_fraction(d)}  •  A: {decimal_to_fraction(a)}")
+                st.caption(f"({h:.2f} • {d:.2f} • {a:.2f})")
             if analysis and analysis.predicted_home_goals:
                 st.caption(f"xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
 
@@ -389,7 +389,7 @@ for date_str, day_fixtures in fixtures_by_date.items():
                             outcome = vb.outcome.replace("_", " ").title()
                             odds_dec = float(vb.odds)
                             odds_frac = decimal_to_fraction(odds_dec)
-                            st.markdown(f"- {outcome} @ {odds_dec:.2f} ({odds_frac}) via {vb.bookmaker} — {float(vb.edge):.1%} edge")
+                            st.markdown(f"- {outcome} @ {odds_frac} ({odds_dec:.2f}) via {vb.bookmaker} — {float(vb.edge):.1%} edge")
 
                 # ELO History Chart
                 home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
@@ -421,7 +421,7 @@ if total_vb > 0:
                 "Match": f"{home} v {away}",
                 "Kick": f["kickoff"].strftime("%a %H:%M"),
                 "Bet": vb.outcome.replace("_", " ").title(),
-                "Odds": f"{odds_dec:.2f} ({decimal_to_fraction(odds_dec)})",
+                "Odds": f"{decimal_to_fraction(odds_dec)} ({odds_dec:.2f})",
                 "Book": vb.bookmaker,
                 "Edge": f"{float(vb.edge):.1%}",
                 "Kelly": f"{float(vb.kelly_stake):.1%}",
