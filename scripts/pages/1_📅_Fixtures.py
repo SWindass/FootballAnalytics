@@ -198,9 +198,6 @@ def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float)
     return fig
 
 
-# Main content
-st.title("📅 Fixtures & Predictions")
-
 # Load data
 teams = load_teams()
 
@@ -267,23 +264,9 @@ if not fixtures:
     st.info("No upcoming fixtures found.")
     st.stop()
 
-# Compact summary
-total_vb = sum(len(f["value_bets"]) for f in fixtures)
-with_pred = sum(1 for f in fixtures if f["analysis"] and f["analysis"].consensus_home_prob)
-cols = st.columns(4)
-cols[0].metric("Fixtures", len(fixtures))
-cols[1].metric("Value Bets", total_vb)
-cols[2].metric("Predictions", f"{with_pred}/{len(fixtures)}")
-
-max_edge = 0
-for f in fixtures:
-    if f["value_bets"]:
-        edge = float(f["value_bets"][0].edge)
-        if edge > max_edge:
-            max_edge = edge
-cols[3].metric("Best Edge", f"{max_edge:.1%}" if max_edge > 0 else "-")
-
-st.divider()
+# Get matchweek from first fixture
+current_mw = fixtures[0]["matchweek"] if fixtures else "?"
+st.title(f"Fixtures - Match Week {current_mw}")
 
 # Group by date
 fixtures_by_date = {}
@@ -309,11 +292,11 @@ for date_str, day_fixtures in fixtures_by_date.items():
         value_bets = fixture["value_bets"]
 
         # Compact match row
-        c1, c2, c3, c4, c5 = st.columns([3, 2, 1, 2, 1])
+        c1, c2, c3, c4, c5 = st.columns([2.5, 2, 0.3, 2, 0.8])
 
         with c1:
             st.markdown(f"**{home_name}** vs **{away_name}**")
-            st.caption(f"{kickoff_time} | MW{fixture['matchweek']}")
+            st.caption(kickoff_time)
 
         with c2:
             st.caption("Prediction")
@@ -328,7 +311,7 @@ for date_str, day_fixtures in fixtures_by_date.items():
                 st.markdown(f"**xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}**")
 
         with c3:
-            st.markdown("<div style='border-left: 2px solid #ddd; height: 120px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='border-left: 2px solid #ddd; height: 100px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
 
         with c4:
             if odds:
