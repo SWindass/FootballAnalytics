@@ -259,7 +259,124 @@ class WeeklyAnalysisJob:
         if not existing:
             self.session.add(analysis)
 
+        # Generate AI narrative
+        try:
+            narrative = self._generate_narrative(
+                match, teams, team_stats, consensus, home_exp, away_exp
+            )
+            if narrative:
+                analysis.narrative = narrative
+                analysis.narrative_generated_at = datetime.utcnow()
+                logger.info(f"Generated narrative for {teams[home_id].short_name} vs {teams[away_id].short_name}")
+        except Exception as e:
+            logger.warning(f"Failed to generate narrative for match {match.id}", error=str(e))
+
         return analysis
+
+    def _generate_narrative(
+        self,
+        match: Match,
+        teams: dict[int, Team],
+        team_stats: dict[int, TeamStats],
+        consensus: tuple[float, float, float],
+        home_exp: float,
+        away_exp: float,
+    ) -> Optional[str]:
+        """Generate AI narrative for a match."""
+        home_team = teams[match.home_team_id]
+        away_team = teams[match.away_team_id]
+        home_stats = team_stats.get(match.home_team_id)
+        away_stats = team_stats.get(match.away_team_id)
+
+        # Build match data dict
+        match_data = {
+            "home_team": home_team.short_name,
+            "away_team": away_team.short_name,
+            "kickoff_time": match.kickoff_time,
+            "venue": home_team.venue or "TBC",
+        }
+
+        # Build home stats dict
+        home_stats_dict = {}
+        if home_stats:
+            home_stats_dict = {
+                "form": home_stats.form or "N/A",
+                "position": "N/A",  # Would need league table query
+                "goals_scored": home_stats.goals_scored,
+                "goals_conceded": home_stats.goals_conceded,
+                "avg_xg_for": float(home_stats.avg_xg_for) if home_stats.avg_xg_for else None,
+                "home_wins": home_stats.home_wins,
+                "home_draws": home_stats.home_draws,
+                "home_losses": home_stats.home_losses,
+                "injuries": [],  # Would need injury data
+            }
+
+        # Build away stats dict
+        away_stats_dict = {}
+        if away_stats:
+            away_stats_dict = {
+                "form": away_stats.form or "N/A",
+                "position": "N/A",
+                "goals_scored": away_stats.goals_scored,
+                "goals_conceded": away_stats.goals_conceded,
+                "avg_xg_for": float(away_stats.avg_xg_for) if away_stats.avg_xg_for else None,
+                "away_wins": away_stats.away_wins,
+                "away_draws": away_stats.away_draws,
+                "away_losses": away_stats.away_losses,
+                "injuries": [],
+            }
+
+        # Build predictions dict
+        predictions = {
+            "home_win": consensus[0],
+            "draw": consensus[1],
+            "away_win": consensus[2],
+            "predicted_score": f"{home_exp:.1f}-{away_exp:.1f}",
+        }
+
+        # Get H2H history
+        h2h = self._get_head_to_head(match.home_team_id, match.away_team_id, teams)
+
+        # Generate narrative (async)
+        return asyncio.run(
+            self.narrative_gen.generate_match_preview(
+                match_data=match_data,
+                home_stats=home_stats_dict,
+                away_stats=away_stats_dict,
+                predictions=predictions,
+                h2h_history=h2h,
+            )
+        )
+
+    def _get_head_to_head(
+        self,
+        home_id: int,
+        away_id: int,
+        teams: dict[int, Team],
+    ) -> list[dict]:
+        """Get head-to-head history between two teams."""
+        stmt = (
+            select(Match)
+            .where(
+                ((Match.home_team_id == home_id) & (Match.away_team_id == away_id)) |
+                ((Match.home_team_id == away_id) & (Match.away_team_id == home_id))
+            )
+            .where(Match.status == MatchStatus.FINISHED)
+            .order_by(Match.kickoff_time.desc())
+            .limit(5)
+        )
+        matches = list(self.session.execute(stmt).scalars().all())
+
+        h2h = []
+        for m in matches:
+            h2h.append({
+                "date": m.kickoff_time.strftime("%d %b %Y"),
+                "home_team": teams[m.home_team_id].short_name,
+                "away_team": teams[m.away_team_id].short_name,
+                "home_score": m.home_score,
+                "away_score": m.away_score,
+            })
+        return h2h
 
 
 def run_weekly_analysis():
