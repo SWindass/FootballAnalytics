@@ -903,8 +903,19 @@ class NeuralStacker:
         hidden_sizes = [128, 64, 32]
         self.build_model(hidden_sizes=hidden_sizes, dropout=0.4)
 
+        # Calculate class weights for imbalanced classes
+        # Home wins (~46%), Draws (~26%), Away wins (~28%)
+        class_counts = np.bincount(y_train, minlength=3)
+        total_samples = len(y_train)
+        # Mild inverse frequency weighting with dampening
+        raw_weights = total_samples / (3 * class_counts + 1e-6)
+        dampened_weights = np.sqrt(raw_weights)
+        dampened_weights = dampened_weights / dampened_weights.mean()
+        class_weights = torch.FloatTensor(dampened_weights).to(self.device)
+        logger.info(f"Class weights: H={class_weights[0]:.2f}, D={class_weights[1]:.2f}, A={class_weights[2]:.2f}")
+
         # Loss and optimizer
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=class_weights)
         optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-5)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
@@ -991,6 +1002,11 @@ class NeuralStacker:
         away_team_id: Optional[int] = None,
         home_prev_fixture: Optional[TeamFixture] = None,
         away_prev_fixture: Optional[TeamFixture] = None,
+        h2h_features: Optional[tuple[float, float, float]] = None,
+        home_home_ppg: float = 0.5,
+        away_away_ppg: float = 0.5,
+        home_recency: Optional[tuple[float, float]] = None,
+        away_recency: Optional[tuple[float, float]] = None,
     ) -> tuple[float, float, float]:
         """Predict match probabilities.
 
@@ -1007,6 +1023,11 @@ class NeuralStacker:
             away_team_id: Away team ID (for congestion calculation)
             home_prev_fixture: Home team's previous fixture (for travel fatigue)
             away_prev_fixture: Away team's previous fixture (for travel fatigue)
+            h2h_features: Tuple of (home_dominance, home_goals_avg, away_goals_avg) from H2H
+            home_home_ppg: Home team's points per game at home
+            away_away_ppg: Away team's points per game away
+            home_recency: Tuple of (recent_form, momentum) for home team
+            away_recency: Tuple of (recent_form, momentum) for away team
 
         Returns:
             Tuple of (home_prob, draw_prob, away_prob)
@@ -1021,7 +1042,9 @@ class NeuralStacker:
             analysis, home_stats, away_stats, home_elo, away_elo, referee,
             home_rest_days, away_rest_days,
             home_team_id, away_team_id,
-            home_prev_fixture, away_prev_fixture
+            home_prev_fixture, away_prev_fixture,
+            h2h_features, home_home_ppg, away_away_ppg,
+            home_recency, away_recency
         )
 
         if feature is None:

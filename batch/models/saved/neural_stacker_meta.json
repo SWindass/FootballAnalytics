@@ -1,9 +1,9 @@
 {
-  "epoch": 13,
-  "val_acc": 0.5305466055870056,
-  "train_samples": 9953,
+  "epoch": 15,
+  "val_acc": 0.5233119130134583,
+  "train_samples": 9956,
   "val_samples": 2488,
-  "saved_at": "2026-01-25T15:21:04.790205+00:00",
+  "saved_at": "2026-01-25T18:05:08.867920+00:00",
   "model_version": 9,
   "input_size": 35,
   "features": [
