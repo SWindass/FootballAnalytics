@@ -22,6 +22,30 @@ def refresh_results():
         return f"Error: {e}"
 
 
+def refresh_odds_and_predictions():
+    """Refresh odds from bookmakers and recalculate predictions."""
+    try:
+        from batch.jobs.odds_refresh import run_odds_refresh
+        from batch.jobs.weekly_analysis import run_weekly_analysis
+
+        # Step 1: Refresh odds
+        odds_result = run_odds_refresh()
+        odds_stored = odds_result.get("odds_stored", 0)
+        value_bets = odds_result.get("value_bets_found", 0)
+
+        # Step 2: Recalculate predictions with new market data
+        analysis_result = run_weekly_analysis()
+        analyses = analysis_result.get("analyses_created", 0)
+
+        return {
+            "odds_stored": odds_stored,
+            "value_bets": value_bets,
+            "analyses": analyses,
+        }
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def refresh_all_narratives(matchweek: int):
     """Regenerate AI narratives for all matches in a matchweek."""
     try:
@@ -415,6 +439,16 @@ with st.sidebar:
             result = refresh_all_narratives(current_mw)
             if isinstance(result, int):
                 st.success(f"Updated {result} synopses")
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error(result)
+
+    if st.button("💰 Refresh Odds & Predictions", use_container_width=True):
+        with st.spinner("Fetching odds and recalculating predictions..."):
+            result = refresh_odds_and_predictions()
+            if isinstance(result, dict):
+                st.success(f"Odds: {result['odds_stored']} | Value bets: {result['value_bets']} | Predictions: {result['analyses']}")
                 st.cache_data.clear()
                 st.rerun()
             else:
