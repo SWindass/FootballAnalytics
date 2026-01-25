@@ -1116,11 +1116,14 @@ class NeuralStacker:
         home_elo: Optional[EloRating],
         away_elo: Optional[EloRating],
     ) -> bool:
-        """Detect if this is a cold start situation (early season with no data).
+        """Detect if this is a cold start situation (early season with limited form data).
 
-        At the start of a season, there's no form data and ELO ratings haven't
-        diverged much, leading the neural network to output near-uniform predictions.
-        In these cases, it's better to use the base model weighted average.
+        For early season matches, form-based features are unreliable because teams
+        have played few games. The neural network with default/sparse features
+        tends to output near-uniform predictions or over-predict draws.
+
+        In these cases, we fall back to the base model weighted average (ELO/Poisson),
+        which uses historical ratings that carry over between seasons.
 
         Returns:
             True if this appears to be a cold start situation
@@ -1142,6 +1145,7 @@ class NeuralStacker:
         away_games = get_games_played(away_stats)
 
         # Less than 3 games each = cold start
+        # Wait for at least 3 matches of form data before trusting neural stacker
         if home_games < 3 and away_games < 3:
             return True
 

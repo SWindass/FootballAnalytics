@@ -119,17 +119,25 @@ def backfill_with_neural_stacker(
 
         # Helper to find most recent stats for a team/season
         def get_team_stats(team_id: int, season: str, matchweek: int):
-            """Get TeamStats, falling back to most recent available if exact MW missing."""
+            """Get TeamStats, falling back to most recent available if exact MW missing.
+
+            Note: We intentionally don't fall back to previous season stats because
+            previous season's form data doesn't predict early season matches well
+            (summer transfers and squad changes make old form unreliable).
+            The neural stacker will detect the cold start and use base models instead.
+            """
             # Try exact matchweek first
             stats = stats_by_team_mw.get((team_id, season, matchweek))
             if stats:
                 return stats
 
-            # Fall back to most recent available matchweek
+            # Fall back to most recent available matchweek in current season
             for mw in range(matchweek - 1, 0, -1):
                 stats = stats_by_team_mw.get((team_id, season, mw))
                 if stats:
                     return stats
+
+            # No current season stats - return None so neural stacker uses cold start fallback
             return None
 
         for i, (match, analysis) in enumerate(results):
