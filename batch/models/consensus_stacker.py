@@ -76,7 +76,7 @@ class ConsensusStacker:
         "poisson_home_prob", "poisson_draw_prob", "poisson_away_prob",
         "market_home_prob", "market_draw_prob", "market_away_prob",
 
-        # === AGREEMENT FEATURES (9 features) ===
+        # === AGREEMENT FEATURES (10 features) ===
         # Average predictions (ensemble baseline)
         "avg_home_prob", "avg_draw_prob", "avg_away_prob",
 
@@ -89,6 +89,9 @@ class ConsensusStacker:
         "max_agreement",  # Max probability where all 3 sources agree on favorite
         "favorite_agreement",  # 1 if all 3 pick same favorite, else 0
         "prediction_entropy",  # Entropy of average prediction (lower = clearer favorite)
+
+        # Disagreement-draw correlation (empirical: +5pp draw rate when disagree)
+        "disagreement_draw_boost",  # 1 if models disagree (draw more likely), else 0
 
         # === STRENGTH FEATURES (3 features) ===
         "elo_diff",  # Normalized ELO difference
@@ -254,6 +257,10 @@ class ConsensusStacker:
             avg_probs = np.clip(avg_probs, 1e-10, 1.0)  # Avoid log(0)
             prediction_entropy = -np.sum(avg_probs * np.log(avg_probs))
 
+            # Disagreement-draw boost: when models disagree, draws are +5pp more likely
+            # Analysis shows: agree=23.7% draws, disagree=28.6% draws
+            disagreement_draw_boost = 0.0 if favorite_agreement else 1.0
+
             # === STRENGTH FEATURES ===
             # ELO difference
             home_elo = elo_lookup.get(
@@ -280,6 +287,7 @@ class ConsensusStacker:
                 avg_home, avg_draw, avg_away,
                 home_std, draw_std, away_std,
                 max_agreement, favorite_agreement, prediction_entropy,
+                disagreement_draw_boost,
                 # Strength features
                 elo_diff, market_favorite_strength, model_confidence_gap,
             ]
@@ -438,6 +446,9 @@ class ConsensusStacker:
         avg_probs = np.clip(avg_probs, 1e-10, 1.0)
         prediction_entropy = -np.sum(avg_probs * np.log(avg_probs))
 
+        # Disagreement-draw boost
+        disagreement_draw_boost = 0.0 if favorite_agreement else 1.0
+
         market_favorite_strength = max(market_home, market_draw, market_away)
         sorted_avg = sorted([avg_home, avg_draw, avg_away], reverse=True)
         model_confidence_gap = sorted_avg[0] - sorted_avg[1]
@@ -449,6 +460,7 @@ class ConsensusStacker:
             avg_home, avg_draw, avg_away,
             home_std, draw_std, away_std,
             max_agreement, favorite_agreement, prediction_entropy,
+            disagreement_draw_boost,
             elo_diff / 400, market_favorite_strength, model_confidence_gap,
         ]
 
@@ -467,7 +479,7 @@ class ConsensusStacker:
         return probs[0], probs[1], probs[2], confidence
 
     def analyze_agreement_accuracy(self):
-        """Analyze how accuracy varies with model agreement."""
+        """Analyze how accuracy and draw rates vary with model agreement."""
 
         X, y = self.prepare_training_data()
 
@@ -475,7 +487,7 @@ class ConsensusStacker:
         split_idx = int(len(X) * 0.8)
         X_val, y_val = X[split_idx:], y[split_idx:]
 
-        # Agreement is stored in feature index 16 (favorite_agreement)
+        # Agreement is stored in feature index 17 (favorite_agreement)
         agreement_idx = self.FEATURE_NAMES.index("favorite_agreement")
 
         agreed = X_val[:, agreement_idx] == 1.0
@@ -488,13 +500,17 @@ class ConsensusStacker:
         # Accuracy when models agree vs disagree
         if agreed.sum() > 0:
             agree_acc = (avg_preds[agreed] == y_val[agreed]).mean()
+            agree_draw_rate = (y_val[agreed] == 1).mean()
         else:
             agree_acc = 0
+            agree_draw_rate = 0
 
         if disagreed.sum() > 0:
             disagree_acc = (avg_preds[disagreed] == y_val[disagreed]).mean()
+            disagree_draw_rate = (y_val[disagreed] == 1).mean()
         else:
             disagree_acc = 0
+            disagree_draw_rate = 0
 
         return {
             "total_matches": len(y_val),
@@ -502,6 +518,8 @@ class ConsensusStacker:
             "matches_disagreed": int(disagreed.sum()),
             "accuracy_when_agreed": agree_acc,
             "accuracy_when_disagreed": disagree_acc,
+            "draw_rate_when_agreed": agree_draw_rate,
+            "draw_rate_when_disagreed": disagree_draw_rate,
             "agreement_rate": agreed.mean(),
         }
 
@@ -524,6 +542,10 @@ def main():
     print(f"Accuracy when ELO + Poisson + Market AGREE: {agreement['accuracy_when_agreed']:.1%}")
     print(f"Accuracy when models DISAGREE:             {agreement['accuracy_when_disagreed']:.1%}")
     print(f"Improvement from agreement:                {agreement['accuracy_when_agreed'] - agreement['accuracy_when_disagreed']:.1%}")
+    print()
+    print(f"Draw rate when models AGREE:    {agreement['draw_rate_when_agreed']:.1%}")
+    print(f"Draw rate when models DISAGREE: {agreement['draw_rate_when_disagreed']:.1%}")
+    print(f"Draw rate increase:             +{(agreement['draw_rate_when_disagreed'] - agreement['draw_rate_when_agreed']):.1%}")
 
     # Train the model
     print()

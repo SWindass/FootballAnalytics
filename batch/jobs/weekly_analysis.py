@@ -187,6 +187,62 @@ class WeeklyAnalysisJob:
 
         return agreement_strength
 
+    def _apply_disagreement_draw_boost(
+        self,
+        consensus: tuple[float, float, float],
+        elo_probs: tuple[float, float, float],
+        poisson_probs: tuple[float, float, float],
+        market_probs: Optional[tuple[float, float, float]],
+    ) -> tuple[float, float, float]:
+        """Boost draw probability when models disagree.
+
+        Analysis shows that when models disagree on the favorite,
+        draws occur more frequently:
+        - Models agree: 23.7% draw rate
+        - Models disagree: 28.6% draw rate (+4.9pp)
+
+        This adjustment improves calibration for uncertain matches.
+        """
+        import numpy as np
+
+        # Use defaults if no market data
+        if not market_probs:
+            market_probs = (0.4, 0.27, 0.33)
+
+        # Which outcome does each model favor?
+        elo_favorite = np.argmax(elo_probs)
+        poisson_favorite = np.argmax(poisson_probs)
+        market_favorite = np.argmax(market_probs)
+
+        # If all models agree, no adjustment needed
+        if elo_favorite == poisson_favorite == market_favorite:
+            return consensus
+
+        # Models disagree - boost draw probability
+        # Empirical boost: +5pp for draw when models disagree
+        DRAW_BOOST = 0.05
+
+        home_prob, draw_prob, away_prob = consensus
+
+        # Add boost to draw
+        new_draw = draw_prob + DRAW_BOOST
+
+        # Subtract proportionally from home/away based on their relative strengths
+        home_share = home_prob / (home_prob + away_prob) if (home_prob + away_prob) > 0 else 0.5
+        away_share = 1 - home_share
+
+        new_home = home_prob - (DRAW_BOOST * home_share)
+        new_away = away_prob - (DRAW_BOOST * away_share)
+
+        # Ensure probabilities stay valid
+        new_home = max(0.05, new_home)
+        new_away = max(0.05, new_away)
+        new_draw = min(0.5, new_draw)  # Cap draw at 50%
+
+        # Normalize
+        total = new_home + new_draw + new_away
+        return (new_home / total, new_draw / total, new_away / total)
+
     def _load_market_predictions(self) -> None:
         """Load market consensus predictions from betting odds.
 
@@ -387,6 +443,11 @@ class WeeklyAnalysisJob:
             else:
                 consensus = neural_consensus
                 logger.debug(f"Neural stacker consensus (no market data): {consensus}")
+
+            # Apply disagreement draw boost
+            consensus = self._apply_disagreement_draw_boost(
+                consensus, elo_probs, poisson_probs, market_probs
+            )
         else:
             # Fallback to weighted average, incorporating market if available
             if market_probs:
@@ -403,6 +464,11 @@ class WeeklyAnalysisJob:
                 consensus = calculate_consensus_probabilities(
                     elo_probs, poisson_probs, None  # XGBoost requires trained model
                 )
+
+            # Apply disagreement draw boost
+            consensus = self._apply_disagreement_draw_boost(
+                consensus, elo_probs, poisson_probs, market_probs
+            )
 
         # Create or update analysis
         existing = self.session.execute(
