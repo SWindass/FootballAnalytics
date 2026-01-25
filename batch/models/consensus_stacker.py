@@ -329,7 +329,24 @@ class ConsensusStacker:
 
         # Build model
         self.build_model(hidden_sizes=hidden_sizes)
-        criterion = nn.CrossEntropyLoss()
+
+        # Calculate class weights to handle imbalanced classes
+        # Home wins (~46%), Draws (~26%), Away wins (~28%)
+        # Use mild weighting to slightly boost draw predictions without over-correcting
+        # Target: predict draws ~20-25% of the time (actual is 25.6%)
+        class_counts = np.bincount(y_train, minlength=3)
+        total_samples = len(y_train)
+
+        # Mild inverse frequency weighting with dampening factor
+        # sqrt() dampens the effect so we don't over-correct
+        raw_weights = total_samples / (3 * class_counts + 1e-6)
+        dampened_weights = np.sqrt(raw_weights)
+        # Normalize so mean = 1
+        dampened_weights = dampened_weights / dampened_weights.mean()
+        class_weights = torch.FloatTensor(dampened_weights).to(self.device)
+        logger.info(f"Class weights: H={class_weights[0]:.2f}, D={class_weights[1]:.2f}, A={class_weights[2]:.2f}")
+
+        criterion = nn.CrossEntropyLoss(weight=class_weights)
         optimizer = optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
