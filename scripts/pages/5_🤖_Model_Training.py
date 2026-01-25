@@ -88,10 +88,28 @@ def get_historical_accuracy():
             if is_correct:
                 by_confidence[bucket]["correct"] += 1
 
-            # Agreement (from features if available)
+            # Model agreement - check if ELO, Poisson, and Market all predict same outcome
+            elo_pred = None
+            poisson_pred = None
+            market_pred = None
+
+            if analysis.elo_home_prob and analysis.elo_draw_prob and analysis.elo_away_prob:
+                elo_probs = [float(analysis.elo_home_prob), float(analysis.elo_draw_prob), float(analysis.elo_away_prob)]
+                elo_pred = np.argmax(elo_probs)
+
+            if analysis.poisson_home_prob and analysis.poisson_draw_prob and analysis.poisson_away_prob:
+                poisson_probs = [float(analysis.poisson_home_prob), float(analysis.poisson_draw_prob), float(analysis.poisson_away_prob)]
+                poisson_pred = np.argmax(poisson_probs)
+
             if analysis.features:
-                features = analysis.features if isinstance(analysis.features, dict) else {}
-                models_agree = features.get("models_agree", False)
+                hist_odds = analysis.features.get("historical_odds", {})
+                if hist_odds and hist_odds.get("implied_home_prob"):
+                    market_probs = [hist_odds.get("implied_home_prob"), hist_odds.get("implied_draw_prob"), hist_odds.get("implied_away_prob")]
+                    market_pred = np.argmax(market_probs)
+
+            # Only count if we have all three models
+            if elo_pred is not None and poisson_pred is not None and market_pred is not None:
+                models_agree = (elo_pred == poisson_pred == market_pred)
                 bucket = "agree" if models_agree else "disagree"
                 by_agreement[bucket]["total"] += 1
                 if is_correct:
@@ -271,45 +289,92 @@ with tab1:
             else:
                 st.metric("Models Disagree", "N/A")
 
-        # Recent accuracy chart
-        if accuracy_data["recent"]:
-            st.subheader("Recent Prediction Results")
+        # Accuracy by matchweek chart
+        st.subheader("Prediction Accuracy by Matchweek")
 
-            recent = accuracy_data["recent"]
+        # Query accuracy grouped by matchweek
+        with SyncSessionLocal() as mw_session:
+            from collections import defaultdict
 
-            # Calculate rolling accuracy
-            window = 20
-            rolling_correct = []
-            for i in range(len(recent)):
-                start = max(0, i - window + 1)
-                window_data = recent[start:i+1]
-                acc = sum(1 for r in window_data if r["correct"]) / len(window_data)
-                rolling_correct.append(acc * 100)
-
-            fig = go.Figure()
-
-            fig.add_trace(go.Scatter(
-                x=list(range(len(rolling_correct))),
-                y=rolling_correct,
-                mode='lines',
-                name=f'{window}-match rolling accuracy',
-                line=dict(color='#2E86AB', width=2)
-            ))
-
-            fig.add_hline(y=33.3, line_dash="dash", line_color="gray",
-                         annotation_text="Random (33.3%)")
-            fig.add_hline(y=accuracy_data['total_accuracy']*100, line_dash="dash",
-                         line_color="green", annotation_text="Overall avg")
-
-            fig.update_layout(
-                title="Rolling Prediction Accuracy (Last 100 Matches)",
-                xaxis_title="Matches (most recent first)",
-                yaxis_title="Accuracy %",
-                yaxis=dict(range=[20, 70]),
-                height=400,
+            stmt = (
+                select(Match, MatchAnalysis)
+                .join(MatchAnalysis, Match.id == MatchAnalysis.match_id)
+                .where(Match.status == MatchStatus.FINISHED)
+                .where(Match.home_score.isnot(None))
+                .where(MatchAnalysis.consensus_home_prob.isnot(None))
+                .order_by(Match.season, Match.matchweek)
             )
+            mw_results = mw_session.execute(stmt).all()
 
-            st.plotly_chart(fig, use_container_width=True)
+            # Group by season and matchweek
+            mw_stats = defaultdict(lambda: {"correct": 0, "total": 0})
+
+            for match, analysis in mw_results:
+                key = (match.season, match.matchweek)
+
+                home_prob = float(analysis.consensus_home_prob)
+                draw_prob = float(analysis.consensus_draw_prob)
+                away_prob = float(analysis.consensus_away_prob)
+
+                predicted = np.argmax([home_prob, draw_prob, away_prob])
+
+                if match.home_score > match.away_score:
+                    actual = 0
+                elif match.home_score < match.away_score:
+                    actual = 2
+                else:
+                    actual = 1
+
+                mw_stats[key]["total"] += 1
+                if predicted == actual:
+                    mw_stats[key]["correct"] += 1
+
+            # Filter to complete matchweeks (10 matches) and recent seasons
+            complete_mws = [
+                (k, v) for k, v in sorted(mw_stats.items())
+                if v["total"] >= 8  # Allow slightly incomplete weeks
+            ]
+
+            # Take last 40 matchweeks for display
+            recent_mws = complete_mws[-40:]
+
+            if recent_mws:
+                x_labels = [f"{k[0][-5:]}\nMW{k[1]}" for k, v in recent_mws]
+                y_values = [v["correct"] / v["total"] * 100 for k, v in recent_mws]
+
+                fig = go.Figure()
+
+                fig.add_trace(go.Bar(
+                    x=list(range(len(x_labels))),
+                    y=y_values,
+                    marker_color=['#E74C3C' if y < 33.3 else '#2E86AB' for y in y_values],
+                    text=[f"{y:.0f}%" for y in y_values],
+                    textposition='outside',
+                ))
+
+                fig.add_hline(y=33.3, line_dash="dash", line_color="gray",
+                             annotation_text="Random (33.3%)")
+
+                fig.update_layout(
+                    title="Prediction Accuracy by Completed Matchweek",
+                    xaxis_title="Season / Matchweek",
+                    yaxis_title="Accuracy %",
+                    yaxis=dict(range=[0, 80]),
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=list(range(len(x_labels))),
+                        ticktext=x_labels,
+                        tickangle=45,
+                    ),
+                    height=450,
+                    showlegend=False,
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.caption("Red bars indicate matchweeks where accuracy fell below random (33.3%)")
+            else:
+                st.info("Not enough completed matchweeks to display")
     else:
         st.info("No historical predictions found to analyze")
 
@@ -356,8 +421,9 @@ with tab2:
             with st.spinner("Training consensus stacker (this may take a few minutes)..."):
                 try:
                     result = train_consensus_model()
-                    st.success(f"Training complete!")
+                    st.success(f"Training complete! Refreshing stats...")
                     st.json(result)
+                    st.rerun()  # Refresh page to show updated stats
                 except Exception as e:
                     st.error(f"Training failed: {e}")
 
@@ -367,8 +433,9 @@ with tab2:
             with st.spinner("Training neural stacker (this may take a few minutes)..."):
                 try:
                     result = train_neural_stacker()
-                    st.success(f"Training complete!")
+                    st.success(f"Training complete! Refreshing stats...")
                     st.json(result)
+                    st.rerun()  # Refresh page to show updated stats
                 except Exception as e:
                     st.error(f"Training failed: {e}")
 

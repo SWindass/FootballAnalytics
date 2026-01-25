@@ -179,8 +179,9 @@ class TestKellyCalculator:
 
     def test_fractional_kelly(self):
         """Test fractional Kelly reduces stake."""
-        kelly_full = KellyCalculator(KellyConfig(fraction=1.0, min_edge=0.0, min_stake=0.0))
-        kelly_quarter = KellyCalculator(KellyConfig(fraction=0.25, min_edge=0.0, min_stake=0.0))
+        # Set max_stake=1.0 to avoid capping the full Kelly result
+        kelly_full = KellyCalculator(KellyConfig(fraction=1.0, min_edge=0.0, min_stake=0.0, max_stake=1.0))
+        kelly_quarter = KellyCalculator(KellyConfig(fraction=0.25, min_edge=0.0, min_stake=0.0, max_stake=1.0))
 
         full_stake = kelly_full.calculate_kelly_stake(0.6, 2.0)
         quarter_stake = kelly_quarter.calculate_kelly_stake(0.6, 2.0)
