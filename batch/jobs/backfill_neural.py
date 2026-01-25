@@ -154,10 +154,8 @@ def backfill_with_neural_stacker(
                 # Get referee if assigned
                 referee = refs_by_id.get(match.referee_id) if match.referee_id else None
 
-                # Skip if missing required data
-                if not home_stats or not away_stats:
-                    skipped += 1
-                    continue
+                # Note: We no longer skip matches without stats - the neural stacker
+                # will detect cold start situations and fall back to base model predictions
 
                 # Calculate H2H features
                 h2h_features = stacker._calculate_h2h_from_cache(

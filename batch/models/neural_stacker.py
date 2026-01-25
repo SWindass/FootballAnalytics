@@ -121,18 +121,22 @@ class NeuralStacker:
         "market_away_prob",  # Market consensus away win probability
     ]
 
-    def __init__(self, temperature: float = 5.0):
+    def __init__(self, temperature: float = 5.0, draw_threshold: float = 0.05):
         """Initialize the neural stacker.
 
         Args:
             temperature: Temperature for probability calibration.
                 Higher values = softer (less extreme) probabilities.
                 Default 5.0 calibrates outputs to be closer to base models.
+            draw_threshold: When |home_prob - away_prob| < threshold and
+                draw_prob > 0.25, predict draw. Helps with close matches.
+                Default 0.05 based on backtesting.
         """
         self.model = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.input_size = len(self.FEATURE_NAMES)
         self.temperature = temperature
+        self.draw_threshold = draw_threshold
 
     def _ensure_model_dir(self):
         """Ensure model directory exists."""
@@ -1045,6 +1049,13 @@ class NeuralStacker:
         Returns:
             Tuple of (home_prob, draw_prob, away_prob)
         """
+        # Check for cold start (early season with no data)
+        # In these cases, the neural network gets uniform inputs and outputs
+        # near-uniform predictions. Better to use base model weighted average.
+        if self._is_cold_start(home_stats, away_stats, home_elo, away_elo):
+            logger.debug("Cold start detected, using fallback prediction")
+            return self._fallback_prediction(analysis)
+
         if self.model is None:
             if not self.load_model():
                 # Fall back to simple average if no model
@@ -1068,7 +1079,10 @@ class NeuralStacker:
             X = torch.tensor([feature], dtype=torch.float32).to(self.device)
             probs = self.model(X, temperature=self.temperature)[0].cpu().numpy()
 
-        return float(probs[0]), float(probs[1]), float(probs[2])
+        # Apply smart draw prediction for close matches
+        probs = self._apply_smart_draw((float(probs[0]), float(probs[1]), float(probs[2])))
+
+        return probs[0], probs[1], probs[2]
 
     def _fallback_prediction(self, analysis: MatchAnalysis) -> tuple[float, float, float]:
         """Fallback to weighted average when model unavailable."""
@@ -1094,6 +1108,80 @@ class NeuralStacker:
         # Normalize
         total = home + draw + away
         return home/total, draw/total, away/total
+
+    def _is_cold_start(
+        self,
+        home_stats: Optional[TeamStats],
+        away_stats: Optional[TeamStats],
+        home_elo: Optional[EloRating],
+        away_elo: Optional[EloRating],
+    ) -> bool:
+        """Detect if this is a cold start situation (early season with no data).
+
+        At the start of a season, there's no form data and ELO ratings haven't
+        diverged much, leading the neural network to output near-uniform predictions.
+        In these cases, it's better to use the base model weighted average.
+
+        Returns:
+            True if this appears to be a cold start situation
+        """
+        # No team stats at all = cold start
+        if home_stats is None and away_stats is None:
+            return True
+
+        # Calculate games played from win/draw/loss records
+        def get_games_played(stats: Optional[TeamStats]) -> int:
+            if stats is None:
+                return 0
+            return (
+                (stats.home_wins or 0) + (stats.home_draws or 0) + (stats.home_losses or 0) +
+                (stats.away_wins or 0) + (stats.away_draws or 0) + (stats.away_losses or 0)
+            )
+
+        home_games = get_games_played(home_stats)
+        away_games = get_games_played(away_stats)
+
+        # Less than 3 games each = cold start
+        if home_games < 3 and away_games < 3:
+            return True
+
+        return False
+
+    def _apply_smart_draw(
+        self,
+        probs: tuple[float, float, float],
+    ) -> tuple[float, float, float]:
+        """Apply smart draw prediction when probabilities are close.
+
+        When home and away win probabilities are within a threshold of each other
+        and draw probability is reasonable (>25%), boost the draw probability.
+        This helps predict draws in close matchups where the model is uncertain.
+
+        Args:
+            probs: Tuple of (home_prob, draw_prob, away_prob) from neural network
+
+        Returns:
+            Adjusted probabilities, potentially with boosted draw
+        """
+        home, draw, away = probs
+
+        # If home and away are very close and draw is reasonable, boost draw
+        if abs(home - away) < self.draw_threshold and draw > 0.25:
+            # Boost draw probability by redistributing from home/away
+            # The boost is proportional to how close home/away are
+            closeness = 1 - (abs(home - away) / self.draw_threshold)
+            boost = 0.08 * closeness  # Max 8% boost
+
+            # Take equally from home and away
+            home_new = home - boost / 2
+            away_new = away - boost / 2
+            draw_new = draw + boost
+
+            # Ensure valid probabilities
+            total = home_new + draw_new + away_new
+            return home_new / total, draw_new / total, away_new / total
+
+        return probs
 
 
 def train_neural_stacker():
