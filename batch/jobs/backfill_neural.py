@@ -117,14 +117,29 @@ def backfill_with_neural_stacker(
         skipped = 0
         errors = 0
 
+        # Helper to find most recent stats for a team/season
+        def get_team_stats(team_id: int, season: str, matchweek: int):
+            """Get TeamStats, falling back to most recent available if exact MW missing."""
+            # Try exact matchweek first
+            stats = stats_by_team_mw.get((team_id, season, matchweek))
+            if stats:
+                return stats
+
+            # Fall back to most recent available matchweek
+            for mw in range(matchweek - 1, 0, -1):
+                stats = stats_by_team_mw.get((team_id, season, mw))
+                if stats:
+                    return stats
+            return None
+
         for i, (match, analysis) in enumerate(results):
             try:
-                # Get TeamStats for this match's matchweek
-                home_stats = stats_by_team_mw.get(
-                    (match.home_team_id, match.season, match.matchweek)
+                # Get TeamStats for this match's matchweek (or most recent)
+                home_stats = get_team_stats(
+                    match.home_team_id, match.season, match.matchweek
                 )
-                away_stats = stats_by_team_mw.get(
-                    (match.away_team_id, match.season, match.matchweek)
+                away_stats = get_team_stats(
+                    match.away_team_id, match.season, match.matchweek
                 )
 
                 # Get ELO ratings (use previous matchweek)

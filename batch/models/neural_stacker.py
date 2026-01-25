@@ -62,9 +62,14 @@ class MatchPredictorNet(nn.Module):
 
         self.network = nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, temperature: float = 1.0):
         logits = self.network(x)
-        return torch.softmax(logits, dim=1)
+        # Temperature scaling for calibration - higher temperature = softer probabilities
+        return torch.softmax(logits / temperature, dim=1)
+
+    def forward_logits(self, x):
+        """Return raw logits without softmax (for temperature calibration)."""
+        return self.network(x)
 
 
 class NeuralStacker:
@@ -116,10 +121,18 @@ class NeuralStacker:
         "market_away_prob",  # Market consensus away win probability
     ]
 
-    def __init__(self):
+    def __init__(self, temperature: float = 5.0):
+        """Initialize the neural stacker.
+
+        Args:
+            temperature: Temperature for probability calibration.
+                Higher values = softer (less extreme) probabilities.
+                Default 5.0 calibrates outputs to be closer to base models.
+        """
         self.model = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.input_size = len(self.FEATURE_NAMES)
+        self.temperature = temperature
 
     def _ensure_model_dir(self):
         """Ensure model directory exists."""
@@ -1053,7 +1066,7 @@ class NeuralStacker:
         self.model.eval()
         with torch.no_grad():
             X = torch.tensor([feature], dtype=torch.float32).to(self.device)
-            probs = self.model(X)[0].cpu().numpy()
+            probs = self.model(X, temperature=self.temperature)[0].cpu().numpy()
 
         return float(probs[0]), float(probs[1]), float(probs[2])
 
