@@ -461,7 +461,8 @@ class WeeklyAnalysisJob:
         # Generate AI narrative
         try:
             narrative = self._generate_narrative(
-                match, teams, team_stats, consensus, home_exp, away_exp
+                match, teams, team_stats, consensus, home_exp, away_exp,
+                elo_probs, poisson_probs, market_probs, agreement_confidence
             )
             if narrative:
                 analysis.narrative = narrative
@@ -480,8 +481,12 @@ class WeeklyAnalysisJob:
         consensus: tuple[float, float, float],
         home_exp: float,
         away_exp: float,
+        elo_probs: tuple[float, float, float] = None,
+        poisson_probs: tuple[float, float, float] = None,
+        market_probs: tuple[float, float, float] = None,
+        confidence: float = 0.0,
     ) -> Optional[str]:
-        """Generate AI narrative for a match."""
+        """Generate AI narrative for a match with confidence analysis."""
         home_team = teams[match.home_team_id]
         away_team = teams[match.away_team_id]
         home_stats = team_stats.get(match.home_team_id)
@@ -536,6 +541,15 @@ class WeeklyAnalysisJob:
         # Get H2H history
         h2h = self._get_head_to_head(match.home_team_id, match.away_team_id, teams)
 
+        # Build confidence data for AI narrative
+        confidence_data = {
+            "confidence": confidence,
+            "models_agree": confidence > 0,
+            "elo_probs": elo_probs or (0.4, 0.27, 0.33),
+            "poisson_probs": poisson_probs or (0.4, 0.27, 0.33),
+            "market_probs": market_probs or (0.4, 0.27, 0.33),
+        }
+
         # Generate narrative (async)
         return asyncio.run(
             self.narrative_gen.generate_match_preview(
@@ -544,6 +558,7 @@ class WeeklyAnalysisJob:
                 away_stats=away_stats_dict,
                 predictions=predictions,
                 h2h_history=h2h,
+                confidence_data=confidence_data,
             )
         )
 

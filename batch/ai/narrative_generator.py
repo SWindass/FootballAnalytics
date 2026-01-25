@@ -14,7 +14,7 @@ settings = get_settings()
 
 MATCH_PREVIEW_PROMPT = """You are a football analyst writing a match preview for the English Premier League.
 
-Write a concise, engaging match preview (150-200 words) for the following fixture:
+Write a concise, engaging match preview (200-250 words) for the following fixture:
 
 **{home_team} vs {away_team}**
 - Kickoff: {kickoff_time}
@@ -36,22 +36,26 @@ Write a concise, engaging match preview (150-200 words) for the following fixtur
 {h2h_summary}
 
 **Model Predictions:**
-- Home win: {home_prob}%
-- Draw: {draw_prob}%
-- Away win: {away_prob}%
+- Consensus: Home {home_prob}% | Draw {draw_prob}% | Away {away_prob}%
 - Predicted score: {predicted_score}
+
+**Prediction Confidence Analysis:**
+{confidence_analysis}
+
+**Value Edge Analysis:**
+{value_edge_analysis}
 
 **Notable absences:**
 - {home_team}: {home_injuries}
 - {away_team}: {away_injuries}
 
-Write the preview focusing on:
-1. Recent form and momentum
-2. Key tactical matchups
-3. Statistical insights
-4. A brief betting angle (mention the model's view and any value)
+Write the preview with these sections:
+1. **Match Overview** - Recent form, context, and what's at stake
+2. **Key Tactical Battle** - The matchup that will decide this game
+3. **Prediction Confidence** - IMPORTANT: Clearly state whether this is a HIGH CONFIDENCE or UNCERTAIN prediction based on the confidence analysis above. If models agree, emphasize this gives us more certainty. If they disagree, warn that this is a difficult match to call.
+4. **Betting Angle** - Whether value exists and how confident we are in the prediction
 
-Keep the tone professional but engaging. Do not use clichés like "six-pointer" or "must-win game" unless truly appropriate."""
+Keep the tone professional. Be honest about uncertainty - if models disagree, say so clearly."""
 
 
 class NarrativeGenerator:
@@ -68,6 +72,9 @@ class NarrativeGenerator:
         away_stats: dict[str, Any],
         predictions: dict[str, float],
         h2h_history: Optional[list[dict]] = None,
+        value_bets: Optional[list[dict]] = None,
+        odds: Optional[dict[str, float]] = None,
+        confidence_data: Optional[dict[str, Any]] = None,
     ) -> str:
         """Generate a match preview narrative.
 
@@ -77,6 +84,9 @@ class NarrativeGenerator:
             away_stats: Away team statistics
             predictions: Model predictions (home_prob, draw_prob, away_prob)
             h2h_history: Optional head-to-head history
+            value_bets: Optional list of detected value bets for this match
+            odds: Optional current bookmaker odds (home_odds, draw_odds, away_odds)
+            confidence_data: Optional confidence analysis with model agreement info
 
         Returns:
             Generated narrative text
@@ -91,6 +101,12 @@ class NarrativeGenerator:
         # Format injuries
         home_injuries = ", ".join(home_stats.get("injuries", [])) or "None reported"
         away_injuries = ", ".join(away_stats.get("injuries", [])) or "None reported"
+
+        # Format value edge analysis
+        value_edge_analysis = self._format_value_edge(predictions, odds, value_bets)
+
+        # Format confidence analysis
+        confidence_analysis = self._format_confidence_analysis(confidence_data)
 
         # Build prompt
         prompt = MATCH_PREVIEW_PROMPT.format(
@@ -113,6 +129,8 @@ class NarrativeGenerator:
             draw_prob=round(predictions.get("draw", 0.33) * 100, 1),
             away_prob=round(predictions.get("away_win", 0.33) * 100, 1),
             predicted_score=predictions.get("predicted_score", "N/A"),
+            confidence_analysis=confidence_analysis,
+            value_edge_analysis=value_edge_analysis,
             home_injuries=home_injuries,
             away_injuries=away_injuries,
         )
@@ -158,6 +176,144 @@ class NarrativeGenerator:
 
         return ", ".join(parts) if parts else "N/A"
 
+    def _format_confidence_analysis(
+        self,
+        confidence_data: Optional[dict[str, Any]],
+    ) -> str:
+        """Format confidence analysis for the prompt.
+
+        Args:
+            confidence_data: Dict containing:
+                - confidence: float (0-1), agreement strength
+                - models_agree: bool, whether all models pick same favorite
+                - elo_probs: tuple of ELO model probabilities
+                - poisson_probs: tuple of Poisson model probabilities
+                - market_probs: tuple of market odds probabilities
+
+        Returns:
+            Formatted string describing prediction confidence
+        """
+        if not confidence_data:
+            return "Confidence data not available."
+
+        confidence = confidence_data.get("confidence", 0)
+        models_agree = confidence_data.get("models_agree", False)
+        elo_probs = confidence_data.get("elo_probs", (0.4, 0.27, 0.33))
+        poisson_probs = confidence_data.get("poisson_probs", (0.4, 0.27, 0.33))
+        market_probs = confidence_data.get("market_probs", (0.4, 0.27, 0.33))
+
+        lines = []
+
+        # Individual model predictions
+        lines.append("Individual Model Predictions:")
+        lines.append(f"  - ELO Model:    Home {elo_probs[0]*100:.0f}% | Draw {elo_probs[1]*100:.0f}% | Away {elo_probs[2]*100:.0f}%")
+        lines.append(f"  - Poisson Model: Home {poisson_probs[0]*100:.0f}% | Draw {poisson_probs[1]*100:.0f}% | Away {poisson_probs[2]*100:.0f}%")
+        lines.append(f"  - Market Odds:   Home {market_probs[0]*100:.0f}% | Draw {market_probs[1]*100:.0f}% | Away {market_probs[2]*100:.0f}%")
+        lines.append("")
+
+        # Agreement status
+        if models_agree:
+            # Determine what they agree on
+            outcomes = ["Home Win", "Draw", "Away Win"]
+            elo_fav = elo_probs.index(max(elo_probs))
+            agreed_outcome = outcomes[elo_fav]
+
+            if confidence >= 0.5:
+                lines.append(f"**HIGH CONFIDENCE PREDICTION** (Confidence: {confidence*100:.0f}%)")
+                lines.append(f"All three models (ELO, Poisson, and Market) agree: {agreed_outcome} is the most likely outcome.")
+                lines.append("Historical accuracy when models agree at this confidence level: ~65-70%")
+                lines.append("This is a STRONG signal - consider this a reliable prediction.")
+            elif confidence >= 0.4:
+                lines.append(f"**MEDIUM CONFIDENCE PREDICTION** (Confidence: {confidence*100:.0f}%)")
+                lines.append(f"All three models agree on {agreed_outcome}, but with moderate conviction.")
+                lines.append("Historical accuracy when models agree: ~57%")
+                lines.append("This is a reasonable prediction but not a certainty.")
+            else:
+                lines.append(f"**LOW CONFIDENCE PREDICTION** (Confidence: {confidence*100:.0f}%)")
+                lines.append(f"Models technically agree on {agreed_outcome}, but with weak conviction.")
+                lines.append("The probabilities are close - this could go any way.")
+        else:
+            lines.append("**MODELS DISAGREE - UNCERTAIN PREDICTION**")
+            lines.append("The ELO, Poisson, and Market models do NOT agree on the most likely outcome.")
+            lines.append("Historical accuracy when models disagree: only ~41%")
+            lines.append("WARNING: This match is difficult to predict. Exercise caution with any bets.")
+
+            # Show what each model favors
+            outcomes = ["Home Win", "Draw", "Away Win"]
+            elo_fav = outcomes[elo_probs.index(max(elo_probs))]
+            poisson_fav = outcomes[poisson_probs.index(max(poisson_probs))]
+            market_fav = outcomes[market_probs.index(max(market_probs))]
+
+            lines.append(f"  - ELO favors: {elo_fav}")
+            lines.append(f"  - Poisson favors: {poisson_fav}")
+            lines.append(f"  - Market favors: {market_fav}")
+
+        return "\n".join(lines)
+
+    def _format_value_edge(
+        self,
+        predictions: dict[str, float],
+        odds: Optional[dict[str, float]],
+        value_bets: Optional[list[dict]],
+    ) -> str:
+        """Format value edge analysis for the prompt.
+
+        Args:
+            predictions: Model probabilities (home_win, draw, away_win)
+            odds: Bookmaker odds (home_odds, draw_odds, away_odds)
+            value_bets: Detected value bets for this match
+
+        Returns:
+            Formatted string describing value edges
+        """
+        lines = []
+
+        # If we have value bets detected, highlight them
+        if value_bets:
+            for vb in value_bets:
+                market = vb.get("market", "Unknown")
+                edge = vb.get("edge", 0) * 100  # Convert to percentage
+                model_prob = vb.get("model_prob", 0) * 100
+                implied_prob = vb.get("implied_prob", 0) * 100
+                odds_val = vb.get("odds", 0)
+                lines.append(
+                    f"- VALUE DETECTED: {market} @ {odds_val:.2f} odds "
+                    f"(Model: {model_prob:.1f}%, Bookmaker: {implied_prob:.1f}%, Edge: +{edge:.1f}%)"
+                )
+
+        # Compare model vs odds even if no official value bet
+        if odds and not value_bets:
+            model_home = predictions.get("home_win", 0.33)
+            model_draw = predictions.get("draw", 0.33)
+            model_away = predictions.get("away_win", 0.33)
+
+            home_odds = odds.get("home_odds", 0)
+            draw_odds = odds.get("draw_odds", 0)
+            away_odds = odds.get("away_odds", 0)
+
+            if home_odds > 0:
+                implied_home = 1 / home_odds
+                edge_home = (model_home - implied_home) * 100
+                if abs(edge_home) > 2:  # Only mention if > 2% difference
+                    lines.append(f"- Home win: Model {model_home*100:.1f}% vs Implied {implied_home*100:.1f}% (Edge: {edge_home:+.1f}%)")
+
+            if draw_odds > 0:
+                implied_draw = 1 / draw_odds
+                edge_draw = (model_draw - implied_draw) * 100
+                if abs(edge_draw) > 2:
+                    lines.append(f"- Draw: Model {model_draw*100:.1f}% vs Implied {implied_draw*100:.1f}% (Edge: {edge_draw:+.1f}%)")
+
+            if away_odds > 0:
+                implied_away = 1 / away_odds
+                edge_away = (model_away - implied_away) * 100
+                if abs(edge_away) > 2:
+                    lines.append(f"- Away win: Model {model_away*100:.1f}% vs Implied {implied_away*100:.1f}% (Edge: {edge_away:+.1f}%)")
+
+        if not lines:
+            return "No significant edge detected - odds appear fairly priced."
+
+        return "\n".join(lines)
+
     def _generate_placeholder(
         self,
         match_data: dict[str, Any],
@@ -201,6 +357,8 @@ async def generate_batch_narratives(
                 away_stats=match.get("away_stats", {}),
                 predictions=match.get("predictions", {}),
                 h2h_history=match.get("h2h_history"),
+                value_bets=match.get("value_bets"),
+                odds=match.get("odds"),
             )
             narratives[match["id"]] = narrative
         except Exception as e:
