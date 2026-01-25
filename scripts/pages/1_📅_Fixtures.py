@@ -12,8 +12,52 @@ from app.core.config import get_settings
 settings = get_settings()
 
 
-def refresh_results():
-    """Fetch latest results from API."""
+def refresh_results_quick():
+    """Quick refresh - fetch latest scores only (no xG, ELO, or retraining)."""
+    try:
+        import asyncio
+        from batch.data_sources.football_data_org import FootballDataClient, parse_match
+        from app.db.models import Match
+
+        client = FootballDataClient()
+        updated = 0
+
+        with SyncSessionLocal() as session:
+            # Fetch recent results (last 7 days)
+            date_from = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+            date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            season_year = settings.current_season.split("-")[0]
+
+            results = asyncio.run(client.get_matches(
+                season=season_year,
+                status="FINISHED",
+                date_from=date_from,
+                date_to=date_to,
+            ))
+
+            for result in results:
+                parsed = parse_match(result)
+                match = session.execute(
+                    select(Match).where(Match.external_id == parsed["external_id"])
+                ).scalar_one_or_none()
+
+                if match and (match.home_score != parsed.get("home_score")):
+                    match.status = parsed["status"]
+                    match.home_score = parsed.get("home_score")
+                    match.away_score = parsed.get("away_score")
+                    match.home_ht_score = parsed.get("home_ht_score")
+                    match.away_ht_score = parsed.get("away_ht_score")
+                    updated += 1
+
+            session.commit()
+
+        return updated
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def refresh_results_full():
+    """Full refresh - scores, xG, ELO, stats, and model retraining."""
     try:
         from batch.jobs.results_update import run_results_update
         result = run_results_update()
@@ -421,18 +465,33 @@ current_mw = get_current_matchweek()
 
 # Sidebar
 with st.sidebar:
-    if st.button("🔄 Refresh Results", use_container_width=True):
-        with st.spinner("Fetching latest results..."):
-            result = refresh_results()
-            if isinstance(result, int):
-                if result > 0:
-                    st.success(f"Updated {result} matches")
-                    st.cache_data.clear()
-                    st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Scores", use_container_width=True, help="Quick refresh - scores only"):
+            with st.spinner("Fetching scores..."):
+                result = refresh_results_quick()
+                if isinstance(result, int):
+                    if result > 0:
+                        st.success(f"Updated {result}")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.info("No new results")
                 else:
-                    st.info("No new results")
-            else:
-                st.error(result)
+                    st.error(result)
+    with col2:
+        if st.button("🔄 Full", use_container_width=True, help="Full refresh - scores, xG, ELO, stats"):
+            with st.spinner("Full refresh (this takes a while)..."):
+                result = refresh_results_full()
+                if isinstance(result, int):
+                    if result > 0:
+                        st.success(f"Updated {result}")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.info("No new results")
+                else:
+                    st.error(result)
 
     if st.button("🤖 Refresh AI Synopsis", use_container_width=True):
         with st.spinner(f"Regenerating narratives for MW{current_mw}..."):
