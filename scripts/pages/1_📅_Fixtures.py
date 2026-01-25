@@ -22,6 +22,119 @@ def refresh_results():
         return f"Error: {e}"
 
 
+def refresh_all_narratives(matchweek: int):
+    """Regenerate AI narratives for all matches in a matchweek."""
+    try:
+        import asyncio
+        from batch.ai.narrative_generator import NarrativeGenerator
+        from app.db.models import Match, MatchAnalysis, Team
+
+        generator = NarrativeGenerator()
+        updated = 0
+
+        with SyncSessionLocal() as session:
+            # Get all matches for matchweek
+            stmt = (
+                select(Match)
+                .where(Match.season == settings.current_season)
+                .where(Match.matchweek == matchweek)
+            )
+            matches = list(session.execute(stmt).scalars().all())
+
+            for match in matches:
+                analysis = session.execute(
+                    select(MatchAnalysis).where(MatchAnalysis.match_id == match.id)
+                ).scalar_one_or_none()
+
+                if not analysis:
+                    continue
+
+                # Load teams
+                home_team = session.get(Team, match.home_team_id)
+                away_team = session.get(Team, match.away_team_id)
+
+                # Build data for narrative generator
+                match_data = {
+                    "home_team": home_team.short_name,
+                    "away_team": away_team.short_name,
+                    "kickoff_time": match.kickoff_time,
+                    "venue": home_team.venue or "TBC",
+                }
+
+                # Get probabilities
+                elo_probs = (
+                    float(analysis.elo_home_prob or 0.4),
+                    float(analysis.elo_draw_prob or 0.27),
+                    float(analysis.elo_away_prob or 0.33),
+                )
+                poisson_probs = (
+                    float(analysis.poisson_home_prob or 0.4),
+                    float(analysis.poisson_draw_prob or 0.27),
+                    float(analysis.poisson_away_prob or 0.33),
+                )
+
+                # Get market probs from features
+                market_probs = None
+                if analysis.features:
+                    mkt_home = analysis.features.get("market_home_prob")
+                    mkt_draw = analysis.features.get("market_draw_prob")
+                    mkt_away = analysis.features.get("market_away_prob")
+                    if mkt_home:
+                        market_probs = (mkt_home, mkt_draw, mkt_away)
+
+                # Build consensus predictions
+                predictions = {
+                    "home_win": float(analysis.consensus_home_prob or 0.4),
+                    "draw": float(analysis.consensus_draw_prob or 0.27),
+                    "away_win": float(analysis.consensus_away_prob or 0.33),
+                    "predicted_score": f"{float(analysis.predicted_home_goals or 1.5):.1f}-{float(analysis.predicted_away_goals or 1.0):.1f}",
+                }
+
+                # Build confidence data
+                confidence = float(analysis.confidence or 0)
+                confidence_data = {
+                    "confidence": confidence,
+                    "models_agree": confidence > 0,
+                    "elo_probs": elo_probs,
+                    "poisson_probs": poisson_probs,
+                    "market_probs": market_probs or (0.4, 0.27, 0.33),
+                }
+
+                # Build odds data
+                odds_data = None
+                if market_probs:
+                    odds_data = {
+                        "home_odds": 1 / market_probs[0] if market_probs[0] > 0 else 0,
+                        "draw_odds": 1 / market_probs[1] if market_probs[1] > 0 else 0,
+                        "away_odds": 1 / market_probs[2] if market_probs[2] > 0 else 0,
+                    }
+
+                # Generate narrative
+                narrative = asyncio.run(
+                    generator.generate_match_preview(
+                        match_data=match_data,
+                        home_stats={},
+                        away_stats={},
+                        predictions=predictions,
+                        h2h_history=None,
+                        confidence_data=confidence_data,
+                        odds=odds_data,
+                    )
+                )
+
+                # Save to database
+                analysis.narrative = narrative
+                analysis.narrative_generated_at = datetime.now(timezone.utc)
+                updated += 1
+
+            session.commit()
+
+        return updated
+
+    except Exception as e:
+        return f"Error: {e}"
+
+
 # Standard color scheme
 COLORS = {
     "home": "#2E86AB",    # Blue
@@ -279,6 +392,9 @@ def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float)
 teams = load_teams()
 team_forms = load_team_forms()
 
+# Get current matchweek early for sidebar button
+current_mw = get_current_matchweek()
+
 # Sidebar
 with st.sidebar:
     if st.button("🔄 Refresh Results", use_container_width=True):
@@ -291,6 +407,16 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.info("No new results")
+            else:
+                st.error(result)
+
+    if st.button("🤖 Refresh AI Synopsis", use_container_width=True):
+        with st.spinner(f"Regenerating narratives for MW{current_mw}..."):
+            result = refresh_all_narratives(current_mw)
+            if isinstance(result, int):
+                st.success(f"Updated {result} synopses")
+                st.cache_data.clear()
+                st.rerun()
             else:
                 st.error(result)
 
@@ -348,8 +474,7 @@ A bet on whether the total goals will be over or under 2.5 (i.e., 3+ goals or 0-
 - Model confidence >= 60%
         """)
 
-# Get current matchweek and load fixtures
-current_mw = get_current_matchweek()
+# Load fixtures for current matchweek
 fixtures = load_matchweek_fixtures(current_mw)
 
 if not fixtures:
@@ -527,6 +652,7 @@ for date_str, day_fixtures in fixtures_by_date.items():
                 # AI Narrative
                 if analysis.narrative:
                     st.markdown("---")
+                    st.markdown("**AI Synopsis**")
                     st.markdown(analysis.narrative)
 
     st.divider()
