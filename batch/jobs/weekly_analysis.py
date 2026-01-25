@@ -616,6 +616,16 @@ class WeeklyAnalysisJob:
             "market_probs": market_probs or (0.4, 0.27, 0.33),
         }
 
+        # Build odds dict for value edge analysis
+        # Convert probabilities back to decimal odds for the narrative generator
+        odds_data = None
+        if market_probs:
+            odds_data = {
+                "home_odds": 1 / market_probs[0] if market_probs[0] > 0 else 0,
+                "draw_odds": 1 / market_probs[1] if market_probs[1] > 0 else 0,
+                "away_odds": 1 / market_probs[2] if market_probs[2] > 0 else 0,
+            }
+
         # Generate narrative (async)
         return asyncio.run(
             self.narrative_gen.generate_match_preview(
@@ -625,6 +635,7 @@ class WeeklyAnalysisJob:
                 predictions=predictions,
                 h2h_history=h2h,
                 confidence_data=confidence_data,
+                odds=odds_data,
             )
         )
 
