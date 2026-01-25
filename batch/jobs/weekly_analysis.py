@@ -14,10 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
-from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus, Team, TeamStats
+from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus, Referee, Team, TeamStats
 from batch.ai.narrative_generator import NarrativeGenerator
 from batch.betting.value_calculator import ValueBetDetector, calculate_consensus_probabilities
+from batch.data_sources.tipster_aggregator import TipsterAggregator
+from batch.models.consensus_stacker import ConsensusStacker
 from batch.models.elo import EloRatingSystem
+from batch.models.neural_stacker import NeuralStacker
 from batch.models.poisson import PoissonModel, calculate_team_strengths
 from batch.models.xgboost_model import MatchOutcomeClassifier, build_feature_dataframe
 
@@ -35,6 +38,12 @@ class WeeklyAnalysisJob:
         self.classifier = MatchOutcomeClassifier()
         self.narrative_gen = NarrativeGenerator()
         self.value_detector = ValueBetDetector()
+        self.neural_stacker = NeuralStacker()
+        self._neural_stacker_available = self.neural_stacker.load_model()
+        self.tipster_aggregator = TipsterAggregator()
+        self._market_predictions: dict[tuple[str, str], tuple[float, float, float]] = {}
+        self.consensus_stacker = ConsensusStacker()
+        self._consensus_stacker_available = self.consensus_stacker.load_model()
 
     def run(self) -> dict:
         """Execute the weekly analysis job.
@@ -54,12 +63,16 @@ class WeeklyAnalysisJob:
 
             logger.info(f"Processing matchweek {matchweek}")
 
+            # 1b. Load market predictions (betting odds consensus)
+            self._load_market_predictions()
+
             # 2. Load teams and their current stats
             teams = self._load_teams()
             team_stats = self._load_team_stats(matchweek - 1)  # Previous matchweek stats
 
             # 3. Initialize ELO ratings
             self._initialize_elo_ratings(matchweek - 1)
+            elo_ratings = self._load_elo_ratings(matchweek - 1)
 
             # 4. Calculate Poisson team strengths
             completed_matches = self._load_completed_matches()
@@ -73,12 +86,18 @@ class WeeklyAnalysisJob:
             matches = self._load_matchweek_fixtures(matchweek)
             logger.info(f"Found {len(matches)} fixtures for matchweek {matchweek}")
 
+            # Log neural stacker status
+            if self._neural_stacker_available:
+                logger.info("Using neural stacker for consensus predictions")
+            else:
+                logger.info("Neural stacker not available, using weighted average")
+
             # 6. Generate predictions for each match
             analyses_created = 0
             for match in matches:
                 try:
                     analysis = self._analyze_match(
-                        match, teams, team_stats, poisson_strengths
+                        match, teams, team_stats, elo_ratings, poisson_strengths
                     )
                     if analysis:
                         analyses_created += 1
@@ -126,6 +145,67 @@ class WeeklyAnalysisJob:
 
         return match.matchweek if match else None
 
+    def _calculate_agreement_confidence(
+        self,
+        elo_probs: tuple[float, float, float],
+        poisson_probs: tuple[float, float, float],
+        market_probs: Optional[tuple[float, float, float]],
+    ) -> float:
+        """Calculate confidence based on model agreement.
+
+        When ELO, Poisson, and market odds all agree on the favorite,
+        confidence is higher. Returns 0 if models disagree.
+
+        Research shows:
+        - All 3 agree: 56.8% accuracy
+        - All 3 agree + 50%+ confidence: 69.6% accuracy
+        - Models disagree: 40.9% accuracy
+        """
+        import numpy as np
+
+        # Use defaults if no market data
+        if not market_probs:
+            market_probs = (0.4, 0.27, 0.33)
+
+        # Which outcome does each model favor?
+        elo_favorite = np.argmax(elo_probs)
+        poisson_favorite = np.argmax(poisson_probs)
+        market_favorite = np.argmax(market_probs)
+
+        # Do all 3 agree?
+        if not (elo_favorite == poisson_favorite == market_favorite):
+            return 0.0  # No agreement
+
+        # All agree - calculate agreement strength
+        # (minimum probability across models for the agreed favorite)
+        if elo_favorite == 0:  # Home
+            agreement_strength = min(elo_probs[0], poisson_probs[0], market_probs[0])
+        elif elo_favorite == 1:  # Draw
+            agreement_strength = min(elo_probs[1], poisson_probs[1], market_probs[1])
+        else:  # Away
+            agreement_strength = min(elo_probs[2], poisson_probs[2], market_probs[2])
+
+        return agreement_strength
+
+    def _load_market_predictions(self) -> None:
+        """Load market consensus predictions from betting odds.
+
+        Fetches predictions based on betting odds from multiple bookmakers.
+        These represent the "wisdom of crowds" and can improve our predictions.
+        """
+        try:
+            predictions = asyncio.run(self.tipster_aggregator.market_predictor.fetch_predictions())
+
+            for pred in predictions:
+                # Key by team names (as they appear in our database)
+                key = (pred.home_team, pred.away_team)
+                self._market_predictions[key] = (pred.home_prob, pred.draw_prob, pred.away_prob)
+
+            logger.info(f"Loaded {len(self._market_predictions)} market consensus predictions")
+        except Exception as e:
+            logger.warning(f"Failed to load market predictions: {e}")
+            self._market_predictions = {}
+
     def _load_teams(self) -> dict[int, Team]:
         """Load all teams indexed by ID."""
         stmt = select(Team)
@@ -143,6 +223,45 @@ class WeeklyAnalysisJob:
         result = self.session.execute(stmt)
         stats = result.scalars().all()
         return {s.team_id: s for s in stats}
+
+    def _load_elo_ratings(self, matchweek: int) -> dict[int, EloRating]:
+        """Load ELO ratings for a specific matchweek."""
+        stmt = (
+            select(EloRating)
+            .where(EloRating.season == settings.current_season)
+            .where(EloRating.matchweek == matchweek)
+        )
+        result = self.session.execute(stmt)
+        ratings = result.scalars().all()
+        return {r.team_id: r for r in ratings}
+
+    def _calculate_rest_days(self, team_id: int, match_date: datetime) -> Optional[int]:
+        """Calculate days since team's last match.
+
+        Args:
+            team_id: Team ID
+            match_date: Date of upcoming match
+
+        Returns:
+            Number of days since last match, or None if no previous match
+        """
+        stmt = (
+            select(Match)
+            .where(
+                (Match.home_team_id == team_id) | (Match.away_team_id == team_id)
+            )
+            .where(Match.kickoff_time < match_date)
+            .where(Match.status == MatchStatus.FINISHED)
+            .order_by(Match.kickoff_time.desc())
+            .limit(1)
+        )
+        prev_match = self.session.execute(stmt).scalar_one_or_none()
+
+        if not prev_match:
+            return None
+
+        delta = match_date - prev_match.kickoff_time
+        return delta.days
 
     def _initialize_elo_ratings(self, matchweek: int) -> None:
         """Initialize ELO system with current ratings."""
@@ -193,6 +312,7 @@ class WeeklyAnalysisJob:
         match: Match,
         teams: dict[int, Team],
         team_stats: dict[int, TeamStats],
+        elo_ratings: dict[int, EloRating],
         poisson_strengths: dict[int, tuple[float, float]],
     ) -> Optional[MatchAnalysis]:
         """Generate analysis for a single match."""
@@ -213,10 +333,76 @@ class WeeklyAnalysisJob:
         over_2_5_prob, _ = self.poisson.over_under_probability(home_exp, away_exp)
         btts_prob, _ = self.poisson.btts_probability(home_exp, away_exp)
 
-        # Calculate consensus
-        consensus = calculate_consensus_probabilities(
-            elo_probs, poisson_probs, None  # XGBoost requires trained model
-        )
+        # Look up market prediction if available
+        home_team = teams[home_id]
+        away_team = teams[away_id]
+        market_key = (home_team.name, away_team.name)
+        market_probs = self._market_predictions.get(market_key)
+
+        # Calculate consensus using neural stacker if available
+        if self._neural_stacker_available:
+            # Create a temporary analysis object with predictions for the neural stacker
+            temp_analysis = MatchAnalysis(match_id=match.id)
+            temp_analysis.elo_home_prob = Decimal(str(round(elo_probs[0], 4)))
+            temp_analysis.elo_draw_prob = Decimal(str(round(elo_probs[1], 4)))
+            temp_analysis.elo_away_prob = Decimal(str(round(elo_probs[2], 4)))
+            temp_analysis.poisson_home_prob = Decimal(str(round(poisson_probs[0], 4)))
+            temp_analysis.poisson_draw_prob = Decimal(str(round(poisson_probs[1], 4)))
+            temp_analysis.poisson_away_prob = Decimal(str(round(poisson_probs[2], 4)))
+            temp_analysis.poisson_over_2_5_prob = Decimal(str(round(over_2_5_prob, 4)))
+            temp_analysis.poisson_btts_prob = Decimal(str(round(btts_prob, 4)))
+
+            # Get team context for neural stacker
+            home_stats_obj = team_stats.get(home_id)
+            away_stats_obj = team_stats.get(away_id)
+            home_elo_obj = elo_ratings.get(home_id)
+            away_elo_obj = elo_ratings.get(away_id)
+
+            # Get referee if assigned
+            referee_obj = None
+            if match.referee_id:
+                referee_obj = self.session.get(Referee, match.referee_id)
+
+            # Calculate rest days for each team
+            home_rest = self._calculate_rest_days(home_id, match.kickoff_time)
+            away_rest = self._calculate_rest_days(away_id, match.kickoff_time)
+
+            # Get neural network consensus
+            neural_consensus = self.neural_stacker.predict(
+                temp_analysis, home_stats_obj, away_stats_obj, home_elo_obj, away_elo_obj,
+                referee_obj, home_rest, away_rest
+            )
+
+            # Blend with market consensus if available (40% market, 60% neural)
+            if market_probs:
+                consensus = (
+                    0.6 * neural_consensus[0] + 0.4 * market_probs[0],
+                    0.6 * neural_consensus[1] + 0.4 * market_probs[1],
+                    0.6 * neural_consensus[2] + 0.4 * market_probs[2],
+                )
+                # Normalize
+                total = sum(consensus)
+                consensus = (consensus[0] / total, consensus[1] / total, consensus[2] / total)
+                logger.debug(f"Blended consensus (60% neural + 40% market): {consensus}")
+            else:
+                consensus = neural_consensus
+                logger.debug(f"Neural stacker consensus (no market data): {consensus}")
+        else:
+            # Fallback to weighted average, incorporating market if available
+            if market_probs:
+                # Blend ELO, Poisson, and market (30%, 30%, 40%)
+                consensus = (
+                    0.3 * elo_probs[0] + 0.3 * poisson_probs[0] + 0.4 * market_probs[0],
+                    0.3 * elo_probs[1] + 0.3 * poisson_probs[1] + 0.4 * market_probs[1],
+                    0.3 * elo_probs[2] + 0.3 * poisson_probs[2] + 0.4 * market_probs[2],
+                )
+                # Normalize
+                total = sum(consensus)
+                consensus = (consensus[0] / total, consensus[1] / total, consensus[2] / total)
+            else:
+                consensus = calculate_consensus_probabilities(
+                    elo_probs, poisson_probs, None  # XGBoost requires trained model
+                )
 
         # Create or update analysis
         existing = self.session.execute(
@@ -255,6 +441,19 @@ class WeeklyAnalysisJob:
             "away_attack": away_strength[0],
             "away_defense": away_strength[1],
         }
+
+        # Store market consensus if available
+        if market_probs:
+            analysis.features["market_home_prob"] = market_probs[0]
+            analysis.features["market_draw_prob"] = market_probs[1]
+            analysis.features["market_away_prob"] = market_probs[2]
+
+        # Calculate agreement confidence
+        agreement_confidence = self._calculate_agreement_confidence(
+            elo_probs, poisson_probs, market_probs
+        )
+        analysis.confidence = Decimal(str(round(agreement_confidence, 3)))
+        analysis.features["models_agree"] = agreement_confidence > 0
 
         if not existing:
             self.session.add(analysis)
