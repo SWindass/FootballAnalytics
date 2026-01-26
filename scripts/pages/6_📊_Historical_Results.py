@@ -57,11 +57,25 @@ def get_available_seasons():
 
 @st.cache_data(ttl=300)
 def get_matchweeks_for_season(season: str):
-    """Get list of matchweeks for a season."""
+    """Get list of completed matchweeks for a season (all matches finished)."""
     with SyncSessionLocal() as session:
+        # Get matchweeks that have at least one finished match
+        # and no scheduled/in-progress matches
+        from sqlalchemy import and_, not_, exists
+
+        # Subquery: matchweeks with any non-finished matches
+        incomplete_mw = (
+            select(Match.matchweek)
+            .where(Match.season == season)
+            .where(Match.status != MatchStatus.FINISHED)
+            .distinct()
+        ).subquery()
+
         stmt = (
             select(Match.matchweek)
             .where(Match.season == season)
+            .where(Match.status == MatchStatus.FINISHED)
+            .where(Match.matchweek.not_in(select(incomplete_mw)))
             .distinct()
             .order_by(Match.matchweek)
         )
