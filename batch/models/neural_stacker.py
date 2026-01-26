@@ -30,7 +30,7 @@ MODEL_PATH = MODEL_DIR / "neural_stacker.pt"
 METADATA_PATH = MODEL_DIR / "neural_stacker_meta.json"
 
 # Model version - increment when features change
-MODEL_VERSION = 9  # v9: 35 features + market odds from historical betting data
+MODEL_VERSION = 10  # v10: 48 features + market-residual + xG strength features
 
 
 class MatchPredictorNet(nn.Module):
@@ -76,7 +76,7 @@ class NeuralStacker:
     """Manages training and inference for the neural stacker model."""
 
     # Feature names for documentation
-    # Extended features include injuries, manager, referee, and congestion data
+    # Extended features include injuries, manager, referee, congestion, market-residual, and xG data
     FEATURE_NAMES = [
         # Model predictions (8 features)
         "elo_home_prob", "elo_draw_prob", "elo_away_prob",
@@ -119,9 +119,27 @@ class NeuralStacker:
         "market_home_prob",  # Market consensus home win probability
         "market_draw_prob",  # Market consensus draw probability
         "market_away_prob",  # Market consensus away win probability
+        # Market-residual features - where our models disagree with market (6 features)
+        # These capture potential mispricing opportunities
+        "elo_vs_market_home",    # elo_home_prob - market_home_prob
+        "elo_vs_market_draw",    # elo_draw_prob - market_draw_prob
+        "elo_vs_market_away",    # elo_away_prob - market_away_prob
+        "poisson_vs_market_home",  # poisson_home_prob - market_home_prob
+        "poisson_vs_market_draw",  # poisson_draw_prob - market_draw_prob
+        "poisson_vs_market_away",  # poisson_away_prob - market_away_prob
+        # xG-based strength features (6 features)
+        # Markets react to goals; xG shows underlying quality
+        "home_xg_for_avg",       # Avg xG created per game (normalized)
+        "home_xg_against_avg",   # Avg xG conceded per game (normalized)
+        "away_xg_for_avg",
+        "away_xg_against_avg",
+        "home_xg_overperform",   # Goals scored - xG (luck factor, normalized)
+        "away_xg_overperform",
+        # Close match draw boost (1 feature)
+        "close_match_draw_boost",  # 1 if |elo_diff| < 50, else 0
     ]
 
-    def __init__(self, temperature: float = 5.0, draw_threshold: float = 0.05):
+    def __init__(self, temperature: float = 5.0, draw_threshold: float = 0.10):
         """Initialize the neural stacker.
 
         Args:
@@ -130,7 +148,7 @@ class NeuralStacker:
                 Default 5.0 calibrates outputs to be closer to base models.
             draw_threshold: When |home_prob - away_prob| < threshold and
                 draw_prob > 0.25, predict draw. Helps with close matches.
-                Default 0.05 based on backtesting.
+                Default 0.10 (increased from 0.05) - EPL draw rate is ~26%.
         """
         self.model = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -604,6 +622,55 @@ class NeuralStacker:
                     market_draw_prob = analysis.features.get("market_draw_prob", 0.27)
                     market_away_prob = analysis.features.get("market_away_prob", 0.33)
 
+            # Market-residual features - capture where our models disagree with market
+            # These differences may indicate value betting opportunities
+            elo_vs_market_home = elo_home - market_home_prob
+            elo_vs_market_draw = elo_draw - market_draw_prob
+            elo_vs_market_away = elo_away - market_away_prob
+            poisson_vs_market_home = poisson_home - market_home_prob
+            poisson_vs_market_draw = poisson_draw - market_draw_prob
+            poisson_vs_market_away = poisson_away - market_away_prob
+
+            # xG-based strength features - markets react to goals, xG shows underlying quality
+            # A team scoring 2 goals/game from 1.2 xG is due for regression
+            home_xg_for_avg = safe_float(home_stats.avg_xg_for, 1.3) / 3 if home_stats else 0.43
+            home_xg_against_avg = safe_float(home_stats.avg_xg_against, 1.3) / 3 if home_stats else 0.43
+            away_xg_for_avg = safe_float(away_stats.avg_xg_for, 1.3) / 3 if away_stats else 0.43
+            away_xg_against_avg = safe_float(away_stats.avg_xg_against, 1.3) / 3 if away_stats else 0.43
+
+            # xG overperformance - positive means scoring more than expected (lucky)
+            # Negative means underperforming xG (unlucky, due for positive regression)
+            if home_stats and home_stats.goals_scored and home_stats.xg_for:
+                games_played = (home_stats.home_wins or 0) + (home_stats.home_draws or 0) + \
+                              (home_stats.home_losses or 0) + (home_stats.away_wins or 0) + \
+                              (home_stats.away_draws or 0) + (home_stats.away_losses or 0)
+                if games_played > 0:
+                    goals_per_game = home_stats.goals_scored / games_played
+                    xg_per_game = float(home_stats.xg_for) / games_played
+                    home_xg_overperform = (goals_per_game - xg_per_game) / 2  # Normalize to ~[-1, 1]
+                else:
+                    home_xg_overperform = 0.0
+            else:
+                home_xg_overperform = 0.0
+
+            if away_stats and away_stats.goals_scored and away_stats.xg_for:
+                games_played = (away_stats.home_wins or 0) + (away_stats.home_draws or 0) + \
+                              (away_stats.home_losses or 0) + (away_stats.away_wins or 0) + \
+                              (away_stats.away_draws or 0) + (away_stats.away_losses or 0)
+                if games_played > 0:
+                    goals_per_game = away_stats.goals_scored / games_played
+                    xg_per_game = float(away_stats.xg_for) / games_played
+                    away_xg_overperform = (goals_per_game - xg_per_game) / 2  # Normalize to ~[-1, 1]
+                else:
+                    away_xg_overperform = 0.0
+            else:
+                away_xg_overperform = 0.0
+
+            # Close match draw boost - when ELO diff is small, draws are more likely
+            # Markets often misprice draws in close matchups
+            raw_elo_diff = home_elo_val - away_elo_val
+            close_match_draw_boost = 1.0 if abs(raw_elo_diff) < 50 else 0.0
+
             return [
                 # Model predictions
                 elo_home, elo_draw, elo_away,
@@ -632,6 +699,15 @@ class NeuralStacker:
                 home_momentum, away_momentum,
                 # Market odds (wisdom of crowds)
                 market_home_prob, market_draw_prob, market_away_prob,
+                # Market-residual features (mispricing indicators)
+                elo_vs_market_home, elo_vs_market_draw, elo_vs_market_away,
+                poisson_vs_market_home, poisson_vs_market_draw, poisson_vs_market_away,
+                # xG-based strength features
+                home_xg_for_avg, home_xg_against_avg,
+                away_xg_for_avg, away_xg_against_avg,
+                home_xg_overperform, away_xg_overperform,
+                # Close match draw boost
+                close_match_draw_boost,
             ]
 
         except Exception as e:
@@ -1077,19 +1153,64 @@ class NeuralStacker:
         self.model.eval()
         with torch.no_grad():
             X = torch.tensor([feature], dtype=torch.float32).to(self.device)
-            probs = self.model(X, temperature=self.temperature)[0].cpu().numpy()
+            neural_probs = self.model(X, temperature=self.temperature)[0].cpu().numpy()
+
+        # Blend neural network output with market odds (if available)
+        # Market odds are the best single predictor, so anchor predictions to them
+        probs = (float(neural_probs[0]), float(neural_probs[1]), float(neural_probs[2]))
+
+        if analysis.features:
+            hist_odds = analysis.features.get("historical_odds", {})
+            if hist_odds and hist_odds.get("implied_home_prob"):
+                market_probs = (
+                    hist_odds.get("implied_home_prob", 0.4),
+                    hist_odds.get("implied_draw_prob", 0.27),
+                    hist_odds.get("implied_away_prob", 0.33),
+                )
+                # 40% neural network, 60% market odds - market is more reliable
+                probs = tuple(0.4 * n + 0.6 * m for n, m in zip(probs, market_probs))
+                # Normalize
+                total = sum(probs)
+                probs = tuple(p / total for p in probs)
 
         # Apply smart draw prediction for close matches
-        probs = self._apply_smart_draw((float(probs[0]), float(probs[1]), float(probs[2])))
+        probs = self._apply_smart_draw(probs)
 
         return probs[0], probs[1], probs[2]
 
     def _fallback_prediction(self, analysis: MatchAnalysis) -> tuple[float, float, float]:
-        """Fallback to weighted average when model unavailable."""
+        """Fallback prediction using market odds when available, else ELO/Poisson.
+
+        Market odds are the most reliable predictor, especially for early season
+        when form data is sparse. They represent the wisdom of professional bettors
+        and bookmakers who have access to insider information.
+        """
         def safe_float(val, default=0.33):
             return float(val) if val else default
 
-        # Simple weighted average (original method)
+        # Check for market odds first - these are the gold standard
+        if analysis.features:
+            hist_odds = analysis.features.get("historical_odds", {})
+            if hist_odds and hist_odds.get("implied_home_prob"):
+                # Use market odds as primary, blend with ELO for stability
+                market_home = hist_odds.get("implied_home_prob", 0.4)
+                market_draw = hist_odds.get("implied_draw_prob", 0.27)
+                market_away = hist_odds.get("implied_away_prob", 0.33)
+
+                # Light blend with ELO for edge cases where odds might be stale
+                elo_home = safe_float(analysis.elo_home_prob, market_home)
+                elo_draw = safe_float(analysis.elo_draw_prob, market_draw)
+                elo_away = safe_float(analysis.elo_away_prob, market_away)
+
+                # 80% market odds, 20% ELO
+                home = market_home * 0.8 + elo_home * 0.2
+                draw = market_draw * 0.8 + elo_draw * 0.2
+                away = market_away * 0.8 + elo_away * 0.2
+
+                total = home + draw + away
+                return home/total, draw/total, away/total
+
+        # No market odds available - use ELO/Poisson weighted average
         elo_w, poisson_w = 0.45, 0.55
 
         home = (
@@ -1158,8 +1279,10 @@ class NeuralStacker:
         """Apply smart draw prediction when probabilities are close.
 
         When home and away win probabilities are within a threshold of each other
-        and draw probability is reasonable (>25%), boost the draw probability.
+        and draw probability is reasonable (>22%), boost the draw probability.
         This helps predict draws in close matchups where the model is uncertain.
+
+        EPL draw rate is ~26%, but markets often underprice draws in close matches.
 
         Args:
             probs: Tuple of (home_prob, draw_prob, away_prob) from neural network
@@ -1170,11 +1293,12 @@ class NeuralStacker:
         home, draw, away = probs
 
         # If home and away are very close and draw is reasonable, boost draw
-        if abs(home - away) < self.draw_threshold and draw > 0.25:
+        # Lowered draw floor from 0.25 to 0.22 to catch more draw opportunities
+        if abs(home - away) < self.draw_threshold and draw > 0.22:
             # Boost draw probability by redistributing from home/away
             # The boost is proportional to how close home/away are
             closeness = 1 - (abs(home - away) / self.draw_threshold)
-            boost = 0.08 * closeness  # Max 8% boost
+            boost = 0.15 * closeness  # Max 15% boost (increased from 8%)
 
             # Take equally from home and away
             home_new = home - boost / 2

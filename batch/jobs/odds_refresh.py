@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, Team, ValueBet
-from batch.betting.value_calculator import ValueBetDetector
+from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, Team, ValueBet, TeamStats, EloRating
+from batch.betting.value_detector import ValueDetector, ValueDetectorConfig
 from batch.data_sources.the_odds_api import OddsApiClient, match_team_names, parse_odds
 
 logger = structlog.get_logger()
@@ -28,7 +28,14 @@ class OddsRefreshJob:
     def __init__(self, session: Optional[Session] = None):
         self.session = session or SyncSessionLocal()
         self.odds_client = OddsApiClient()
-        self.value_detector = ValueBetDetector()
+        # Use optimized config: away wins with 5-12% edge (backtest shows +20% ROI)
+        self.value_detector = ValueDetector(ValueDetectorConfig(
+            min_edge=0.05,
+            max_edge=0.12,
+            allowed_outcomes=["away_win"],  # Focus on profitable outcome
+            min_confidence=0.50,
+            min_models_agreeing=1,
+        ))
 
     def run(self) -> dict:
         """Execute the odds refresh job.
@@ -157,7 +164,11 @@ class OddsRefreshJob:
         return stored
 
     def _detect_value_bets(self) -> int:
-        """Detect value betting opportunities."""
+        """Detect value betting opportunities.
+
+        Uses optimized ValueDetector configured for away wins with 5-12% edge,
+        which backtest shows has +20% ROI.
+        """
         # Get upcoming matches with analysis
         now = datetime.utcnow()
         stmt = (
@@ -188,50 +199,48 @@ class OddsRefreshJob:
             )
             odds_records = list(self.session.execute(stmt).scalars().all())
 
-            if not odds_records:
-                continue
+            # Get team stats for previous matchweek
+            home_stats = self.session.execute(
+                select(TeamStats)
+                .where(TeamStats.team_id == match.home_team_id)
+                .where(TeamStats.season == match.season)
+                .where(TeamStats.matchweek == match.matchweek - 1)
+            ).scalar_one_or_none()
 
-            # Build predictions dict
-            predictions = {
-                "home_win": float(analysis.consensus_home_prob),
-                "draw": float(analysis.consensus_draw_prob),
-                "away_win": float(analysis.consensus_away_prob),
-            }
-            if analysis.poisson_over_2_5_prob:
-                predictions["over_2_5"] = float(analysis.poisson_over_2_5_prob)
-                predictions["under_2_5"] = 1 - float(analysis.poisson_over_2_5_prob)
-            if analysis.poisson_btts_prob:
-                predictions["btts_yes"] = float(analysis.poisson_btts_prob)
-                predictions["btts_no"] = 1 - float(analysis.poisson_btts_prob)
+            away_stats = self.session.execute(
+                select(TeamStats)
+                .where(TeamStats.team_id == match.away_team_id)
+                .where(TeamStats.season == match.season)
+                .where(TeamStats.matchweek == match.matchweek - 1)
+            ).scalar_one_or_none()
 
-            # Build odds dict by bookmaker
-            odds_by_bookmaker: dict[str, dict[str, float]] = {}
-            for odds in odds_records:
-                if odds.bookmaker not in odds_by_bookmaker:
-                    odds_by_bookmaker[odds.bookmaker] = {}
-                bm = odds_by_bookmaker[odds.bookmaker]
-                if odds.home_odds:
-                    bm["home_win"] = float(odds.home_odds)
-                if odds.draw_odds:
-                    bm["draw"] = float(odds.draw_odds)
-                if odds.away_odds:
-                    bm["away_win"] = float(odds.away_odds)
-                if odds.over_2_5_odds:
-                    bm["over_2_5"] = float(odds.over_2_5_odds)
-                if odds.under_2_5_odds:
-                    bm["under_2_5"] = float(odds.under_2_5_odds)
+            # Get ELO ratings
+            home_elo = self.session.execute(
+                select(EloRating)
+                .where(EloRating.team_id == match.home_team_id)
+                .where(EloRating.season == match.season)
+                .where(EloRating.matchweek == match.matchweek - 1)
+            ).scalar_one_or_none()
 
-            # Detect value bets
-            value_bets = self.value_detector.detect_value_bets(
-                match.id, predictions, odds_by_bookmaker
+            away_elo = self.session.execute(
+                select(EloRating)
+                .where(EloRating.team_id == match.away_team_id)
+                .where(EloRating.season == match.season)
+                .where(EloRating.matchweek == match.matchweek - 1)
+            ).scalar_one_or_none()
+
+            # Detect value bets using optimized detector
+            value_bets = self.value_detector.find_value_bets(
+                match_id=match.id,
+                analysis=analysis,
+                home_stats=home_stats,
+                away_stats=away_stats,
+                home_elo=home_elo,
+                away_elo=away_elo,
+                odds_history=odds_records,
             )
 
             # Deactivate existing value bets for this match
-            self.session.execute(
-                select(ValueBet)
-                .where(ValueBet.match_id == match.id)
-                .where(ValueBet.is_active == True)
-            )
             existing = list(self.session.execute(
                 select(ValueBet).where(ValueBet.match_id == match.id).where(ValueBet.is_active == True)
             ).scalars().all())
@@ -244,16 +253,23 @@ class OddsRefreshJob:
                     match_id=vb.match_id,
                     outcome=vb.outcome,
                     bookmaker=vb.bookmaker,
-                    model_probability=vb.model_probability,
-                    implied_probability=vb.implied_probability,
-                    edge=vb.edge,
-                    odds=vb.odds,
-                    kelly_stake=vb.kelly_stake,
-                    recommended_stake=vb.recommended_stake,
+                    model_probability=Decimal(str(round(vb.model_prob, 4))),
+                    implied_probability=Decimal(str(round(vb.market_prob, 4))),
+                    edge=Decimal(str(round(vb.edge, 4))),
+                    odds=Decimal(str(round(vb.odds, 2))),
+                    kelly_stake=Decimal(str(round(vb.kelly_stake, 4))),
+                    recommended_stake=Decimal(str(round(vb.recommended_stake, 4))),
                     is_active=True,
                 )
                 self.session.add(new_bet)
                 value_bets_created += 1
+
+            if value_bets:
+                logger.info(
+                    f"Found {len(value_bets)} value bet(s) for match {match.id}",
+                    outcomes=[vb.outcome for vb in value_bets],
+                    edges=[f"{vb.edge:.1%}" for vb in value_bets],
+                )
 
         return value_bets_created
 

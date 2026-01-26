@@ -93,8 +93,18 @@ class EloRatingSystem:
 
         # Convert expected scores to match probabilities
         # Use a simple transformation that accounts for draws
-        draw_prob = 0.25 - 0.1 * abs(exp_home - exp_away)
-        draw_prob = max(0.15, min(0.35, draw_prob))  # Constrain draw probability
+        # EPL draw rate is ~26%, markets often underprice draws in close matches
+        rating_diff = abs(home_rating - away_rating)
+
+        # Base draw probability - higher for close matches
+        draw_prob = 0.28 - 0.08 * abs(exp_home - exp_away)
+
+        # Boost draw probability when teams are closely matched (ELO diff < 50)
+        if rating_diff < 50:
+            draw_prob += 0.05 * (1 - rating_diff / 50)  # Up to 5% extra for very close
+
+        # Raised cap from 35% to 45% to allow for more draw predictions
+        draw_prob = max(0.15, min(0.45, draw_prob))
 
         remaining = 1 - draw_prob
         home_win_prob = exp_home * remaining
