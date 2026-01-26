@@ -1,0 +1,74 @@
+{
+  "min_history": 2,
+  "lookback_window": 10,
+  "min_reliability": 0.6,
+  "team_history": {
+    "11": [
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "6": [
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "8": [
+      true,
+      true,
+      false,
+      false,
+      true,
+      false
+    ],
+    "40": [
+      true,
+      true,
+      true,
+      true
+    ],
+    "7": [
+      true,
+      true,
+      true
+    ],
+    "1": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ],
+    "39": [
+      true
+    ],
+    "4": [
+      true
+    ],
+    "16": [
+      true
+    ],
+    "9": [
+      true,
+      false
+    ],
+    "20": [
+      false
+    ],
+    "2": [
+      false
+    ]
+  }
+}

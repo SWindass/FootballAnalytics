@@ -242,6 +242,7 @@ class Backtester:
                     home_elo=home_elo,
                     away_elo=away_elo,
                     odds_history=odds_history,
+                    home_team_id=match.home_team_id,
                 )
 
                 # Determine actual result

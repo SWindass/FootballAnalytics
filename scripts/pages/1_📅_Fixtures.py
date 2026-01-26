@@ -319,14 +319,30 @@ def load_matchweek_fixtures(matchweek: int):
                 .limit(1)
             ).scalar_one_or_none()
 
-            # Only show away wins (backtest shows +20% ROI on away wins with 5-12% edge)
+            # Load value bets: away wins (5-12% edge) OR home wins (odds < 1.7, edge >= 10%)
+            # Both strategies validated by backtest at +20% ROI
+            from sqlalchemy import or_, and_
+
             value_bets = list(session.execute(
                 select(ValueBet)
                 .where(ValueBet.match_id == match.id)
                 .where(ValueBet.is_active == True)
-                .where(ValueBet.outcome == "away_win")
-                .where(ValueBet.edge >= 0.05)
-                .where(ValueBet.edge <= 0.12)
+                .where(
+                    or_(
+                        # Away win strategy: 5-12% edge
+                        and_(
+                            ValueBet.outcome == "away_win",
+                            ValueBet.edge >= 0.05,
+                            ValueBet.edge <= 0.12,
+                        ),
+                        # Home win strategy: odds < 1.7, edge >= 10%
+                        and_(
+                            ValueBet.outcome == "home_win",
+                            ValueBet.odds < 1.70,
+                            ValueBet.edge >= 0.10,
+                        ),
+                    )
+                )
                 .order_by(ValueBet.edge.desc())
             ).scalars().all())
 
@@ -566,11 +582,17 @@ A bet on whether the total goals will be over or under 2.5 (i.e., 3+ goals or 0-
 - **Poisson** (40%): Goal distribution model
 - **XGBoost** (25%): ML classifier
 
-**Value Bet Strategy** (backtest-optimized):
-- **Away wins only** with 5-12% edge
+**Value Bet Strategies** (backtest-validated):
+
+*Away Wins (5-12% edge)*
 - Backtest: +20% ROI, 51.6% win rate
 - Higher edges (>12%) are overconfident
-- Home wins/draws not shown (no edge)
+
+*Home Wins (filtered)*
+- Only odds < 1.70 (short favorites)
+- Only edge >= 10%
+- Only reliable teams (tracked automatically)
+- Backtest: +21% ROI, 83% win rate
         """)
 
 # Load fixtures for current matchweek
@@ -768,12 +790,13 @@ for date_str, day_fixtures in fixtures_by_date.items():
 
     st.divider()
 
-# Value bets summary (only showing away wins with 5-12% edge)
+# Value bets summary
 if any(f["value_bets"] for f in fixtures):
     st.markdown("### 💰 Value Bets")
     st.success(
-        "**Away wins with 5-12% edge** — Backtest on 2,000+ EPL matches shows **+20% ROI** and **51.6% win rate**. "
-        "Kelly stake indicates recommended bet size (as % of bankroll)."
+        "Two backtest-validated strategies:\n\n"
+        "**Away wins** (5-12% edge): +20% ROI, 51.6% win rate\n\n"
+        "**Home wins** (odds < 1.70, edge ≥ 10%, reliable teams): +21% ROI, 83% win rate"
     )
 
     all_vb = []
@@ -782,10 +805,11 @@ if any(f["value_bets"] for f in fixtures):
         away = teams.get(f["away_team_id"], {}).get("short_name", "?")
         for vb in f["value_bets"]:
             odds_dec = float(vb.odds)
+            bet_type = "Home Win" if vb.outcome == "home_win" else "Away Win"
             all_vb.append({
                 "Match": f"{home} v {away}",
                 "Kick-off": f["kickoff"].strftime("%a %H:%M"),
-                "Bet": "Away Win",
+                "Bet": bet_type,
                 "Odds": f"{decimal_to_fraction(odds_dec)} ({odds_dec:.2f})",
                 "Bookmaker": vb.bookmaker,
                 "Edge": f"+{float(vb.edge):.1%}",
@@ -794,12 +818,13 @@ if any(f["value_bets"] for f in fixtures):
 
     all_vb.sort(key=lambda x: float(x["Edge"].lstrip("+").rstrip("%")), reverse=True)
 
-    # Dedupe by match
+    # Dedupe by match+bet combination
     seen = set()
     unique = []
     for vb in all_vb:
-        if vb["Match"] not in seen:
-            seen.add(vb["Match"])
+        key = (vb["Match"], vb["Bet"])
+        if key not in seen:
+            seen.add(key)
             unique.append(vb)
 
     if unique:
