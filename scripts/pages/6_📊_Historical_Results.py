@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timezone
 from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
 from collections import defaultdict
 
 from app.db.database import SyncSessionLocal
@@ -25,12 +26,12 @@ def load_teams():
 
 @st.cache_data(ttl=300)
 def get_available_seasons():
-    """Get list of seasons with data, oldest first (most recent on right)."""
+    """Get list of seasons with data."""
     with SyncSessionLocal() as session:
         stmt = (
             select(Match.season)
             .distinct()
-            .order_by(Match.season.asc())  # Oldest first, most recent last (on right)
+            .order_by(Match.season.asc())
         )
         return [s for (s,) in session.execute(stmt).all()]
 
@@ -50,28 +51,44 @@ def get_matchweeks_for_season(season: str):
 
 @st.cache_data(ttl=60)
 def load_matchweek_results(season: str, matchweek: int):
-    """Load results for a specific matchweek."""
+    """Load results for a specific matchweek with single query."""
     with SyncSessionLocal() as session:
+        # Single query with joins
         stmt = (
-            select(Match)
+            select(Match, MatchAnalysis)
+            .outerjoin(MatchAnalysis, Match.id == MatchAnalysis.match_id)
             .where(Match.season == season)
             .where(Match.matchweek == matchweek)
             .order_by(Match.kickoff_time)
         )
-        matches = list(session.execute(stmt).scalars().all())
+        rows = list(session.execute(stmt).all())
+
+        # Get match IDs for value bet lookup
+        match_ids = [m.id for m, _ in rows]
+
+        # Batch load value bets
+        vb_stmt = select(ValueBet).where(ValueBet.match_id.in_(match_ids))
+        all_value_bets = list(session.execute(vb_stmt).scalars().all())
+        vb_by_match = defaultdict(list)
+        for vb in all_value_bets:
+            vb_by_match[vb.match_id].append({
+                "outcome": vb.outcome,
+                "odds": float(vb.odds),
+                "edge": float(vb.edge),
+                "bookmaker": vb.bookmaker,
+            })
 
         results = []
-        for match in matches:
-            analysis = session.execute(
-                select(MatchAnalysis).where(MatchAnalysis.match_id == match.id)
-            ).scalar_one_or_none()
-
-            # Get value bets for this match
-            value_bets = list(session.execute(
-                select(ValueBet).where(ValueBet.match_id == match.id)
-            ).scalars().all())
-
+        for match, analysis in rows:
             is_finished = match.status == MatchStatus.FINISHED
+
+            analysis_data = None
+            if analysis and analysis.consensus_home_prob:
+                analysis_data = {
+                    "home_prob": float(analysis.consensus_home_prob),
+                    "draw_prob": float(analysis.consensus_draw_prob),
+                    "away_prob": float(analysis.consensus_away_prob),
+                }
 
             results.append({
                 "id": match.id,
@@ -81,8 +98,8 @@ def load_matchweek_results(season: str, matchweek: int):
                 "home_score": match.home_score,
                 "away_score": match.away_score,
                 "is_finished": is_finished,
-                "analysis": analysis,
-                "value_bets": value_bets,
+                "analysis": analysis_data,
+                "value_bets": vb_by_match.get(match.id, []),
             })
 
         return results
@@ -92,35 +109,29 @@ def load_matchweek_results(season: str, matchweek: int):
 def load_season_summary(season: str):
     """Load summary stats for a season."""
     with SyncSessionLocal() as session:
-        # Get all finished matches with analysis
         stmt = (
-            select(Match, MatchAnalysis)
+            select(Match.matchweek,
+                   MatchAnalysis.consensus_home_prob,
+                   MatchAnalysis.consensus_draw_prob,
+                   MatchAnalysis.consensus_away_prob,
+                   Match.home_score, Match.away_score)
             .join(MatchAnalysis, Match.id == MatchAnalysis.match_id)
             .where(Match.season == season)
             .where(Match.status == MatchStatus.FINISHED)
+            .where(MatchAnalysis.consensus_home_prob.isnot(None))
             .order_by(Match.matchweek)
         )
-        results = list(session.execute(stmt).all())
+        rows = list(session.execute(stmt).all())
 
-        # Calculate accuracy by matchweek
-        mw_stats = defaultdict(lambda: {"correct": 0, "total": 0, "matches": []})
+        mw_stats = defaultdict(lambda: {"correct": 0, "total": 0})
+        for mw, home_prob, draw_prob, away_prob, home_score, away_score in rows:
+            h, d, a = float(home_prob), float(draw_prob), float(away_prob)
+            predicted = "home" if h > d and h > a else ("away" if a > d else "draw")
+            actual = "home" if home_score > away_score else ("away" if away_score > home_score else "draw")
 
-        for match, analysis in results:
-            if analysis.consensus_home_prob:
-                home_prob = float(analysis.consensus_home_prob)
-                draw_prob = float(analysis.consensus_draw_prob)
-                away_prob = float(analysis.consensus_away_prob)
-
-                predicted = "home" if home_prob > draw_prob and home_prob > away_prob else (
-                    "away" if away_prob > draw_prob else "draw"
-                )
-                actual = "home" if match.home_score > match.away_score else (
-                    "away" if match.away_score > match.home_score else "draw"
-                )
-
-                mw_stats[match.matchweek]["total"] += 1
-                if predicted == actual:
-                    mw_stats[match.matchweek]["correct"] += 1
+            mw_stats[mw]["total"] += 1
+            if predicted == actual:
+                mw_stats[mw]["correct"] += 1
 
         return dict(mw_stats)
 
@@ -130,59 +141,42 @@ def load_season_value_bets(season: str):
     """Load value bet performance for a season."""
     with SyncSessionLocal() as session:
         stmt = (
-            select(ValueBet, Match)
+            select(ValueBet.outcome, ValueBet.odds, ValueBet.edge, ValueBet.bookmaker,
+                   Match.matchweek, Match.home_team_id, Match.away_team_id,
+                   Match.home_score, Match.away_score, Match.id)
             .join(Match, ValueBet.match_id == Match.id)
             .where(Match.season == season)
             .where(Match.status == MatchStatus.FINISHED)
             .order_by(Match.matchweek, Match.kickoff_time)
         )
-        results = list(session.execute(stmt).all())
+        rows = list(session.execute(stmt).all())
 
         performance = []
-        for vb, match in results:
-            if match.home_score > match.away_score:
-                actual = "home_win"
-            elif match.home_score == match.away_score:
-                actual = "draw"
-            else:
-                actual = "away_win"
-
-            won = vb.outcome == actual
+        for outcome, odds, edge, bookmaker, mw, home_id, away_id, home_score, away_score, match_id in rows:
+            actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
+            won = outcome == actual
             stake = 10.0
-            profit = stake * (float(vb.odds) - 1) if won else -stake
+            profit = stake * (float(odds) - 1) if won else -stake
 
             performance.append({
-                "matchweek": match.matchweek,
-                "match_id": match.id,
-                "home_team_id": match.home_team_id,
-                "away_team_id": match.away_team_id,
-                "outcome": vb.outcome,
-                "odds": float(vb.odds),
-                "edge": float(vb.edge),
+                "matchweek": mw,
+                "match_id": match_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "outcome": outcome,
+                "odds": float(odds),
+                "edge": float(edge),
                 "won": won,
                 "profit": profit,
-                "bookmaker": vb.bookmaker,
+                "bookmaker": bookmaker,
             })
 
         return performance
 
 
-# Initialize session state for navigation
-if "selected_season_idx" not in st.session_state:
-    st.session_state.selected_season_idx = None  # Will be set to last (most recent) season
-if "selected_mw_idx" not in st.session_state:
-    st.session_state.selected_mw_idx = None  # Will be set to last matchweek
-
-
+# Load data
 teams = load_teams()
 seasons = get_available_seasons()
-
-# Initialize season index to most recent (last in list)
-if st.session_state.selected_season_idx is None:
-    st.session_state.selected_season_idx = len(seasons) - 1 if seasons else 0
-
-# Clamp season index to valid range
-st.session_state.selected_season_idx = max(0, min(st.session_state.selected_season_idx, len(seasons) - 1))
 
 if not seasons:
     st.warning("No seasons found in database")
@@ -190,347 +184,217 @@ if not seasons:
 
 st.title("📊 Historical Results")
 
-# Season navigation with arrows
-st.markdown("### Season")
-col1, col2, col3 = st.columns([1, 3, 1])
+# Default to current season from settings
+default_season = settings.current_season if settings.current_season in seasons else seasons[-1]
+
+# Season and Matchweek navigation
+col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 1, 1, 2, 1])
 
 with col1:
-    # Prev goes to earlier season (lower index)
-    if st.button("◀ Prev", key="prev_season", disabled=st.session_state.selected_season_idx <= 0):
-        st.session_state.selected_season_idx -= 1
-        st.session_state.selected_mw_idx = None  # Reset matchweek
-        st.rerun()
-
+    prev_season = st.button("◀", key="prev_s", help="Previous season")
 with col2:
-    # Season tabs
-    season_tabs = st.tabs(seasons)
+    season_idx = seasons.index(default_season) if "season" not in st.session_state else seasons.index(st.session_state.season) if st.session_state.season in seasons else len(seasons) - 1
 
+    # Handle prev/next
+    if prev_season and season_idx > 0:
+        season_idx -= 1
+    if "next_s_clicked" in st.session_state and st.session_state.next_s_clicked and season_idx < len(seasons) - 1:
+        season_idx += 1
+        st.session_state.next_s_clicked = False
+
+    selected_season = st.selectbox("Season", seasons, index=season_idx, key="season", label_visibility="collapsed")
 with col3:
-    # Next goes to later season (higher index)
-    if st.button("Next ▶", key="next_season", disabled=st.session_state.selected_season_idx >= len(seasons) - 1):
-        st.session_state.selected_season_idx += 1
-        st.session_state.selected_mw_idx = None  # Reset matchweek
+    if st.button("▶", key="next_s", help="Next season"):
+        st.session_state.next_s_clicked = True
         st.rerun()
 
-# Get current season from tab selection
-selected_season = seasons[st.session_state.selected_season_idx]
+# Get matchweeks for selected season
+matchweeks = get_matchweeks_for_season(selected_season)
+if not matchweeks:
+    st.warning("No matchweeks found")
+    st.stop()
 
-# Display content in the selected season tab
-with season_tabs[st.session_state.selected_season_idx]:
-    matchweeks = get_matchweeks_for_season(selected_season)
+# Default to last matchweek
+default_mw_idx = len(matchweeks) - 1
 
-    if not matchweeks:
-        st.warning("No matchweeks found for this season")
-        st.stop()
+with col4:
+    prev_mw = st.button("◀", key="prev_m", help="Previous matchweek")
+with col5:
+    mw_idx = default_mw_idx if "mw" not in st.session_state else (matchweeks.index(st.session_state.mw) if st.session_state.mw in matchweeks else default_mw_idx)
 
-    # Initialize matchweek index if not set
-    if st.session_state.selected_mw_idx is None:
-        st.session_state.selected_mw_idx = len(matchweeks) - 1
+    if prev_mw and mw_idx > 0:
+        mw_idx -= 1
+    if "next_m_clicked" in st.session_state and st.session_state.next_m_clicked and mw_idx < len(matchweeks) - 1:
+        mw_idx += 1
+        st.session_state.next_m_clicked = False
 
-    # Clamp matchweek index to valid range
-    st.session_state.selected_mw_idx = max(0, min(st.session_state.selected_mw_idx, len(matchweeks) - 1))
+    selected_mw = st.selectbox("Matchweek", matchweeks, index=mw_idx, format_func=lambda x: f"MW {x}", key="mw", label_visibility="collapsed")
+with col6:
+    if st.button("▶", key="next_m", help="Next matchweek"):
+        st.session_state.next_m_clicked = True
+        st.rerun()
 
-    selected_mw = matchweeks[st.session_state.selected_mw_idx]
+st.markdown("---")
 
-    # Matchweek navigation with arrows
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 3, 1])
+# Content tabs
+tab1, tab2, tab3 = st.tabs(["📋 Results", "📈 Season Overview", "💰 Value Bets"])
 
-    with col1:
-        if st.button("◀ Prev MW", key="prev_mw", disabled=st.session_state.selected_mw_idx <= 0):
-            st.session_state.selected_mw_idx -= 1
-            st.rerun()
+with tab1:
+    st.subheader(f"Matchweek {selected_mw} - {selected_season}")
 
-    with col2:
-        # Matchweek selector
-        mw_options = [f"MW {mw}" for mw in matchweeks]
-        selected_mw_label = st.selectbox(
-            "Matchweek",
-            mw_options,
-            index=st.session_state.selected_mw_idx,
-            label_visibility="collapsed",
-        )
-        # Update index if changed via selectbox
-        new_idx = mw_options.index(selected_mw_label)
-        if new_idx != st.session_state.selected_mw_idx:
-            st.session_state.selected_mw_idx = new_idx
-            st.rerun()
-
-    with col3:
-        if st.button("Next MW ▶", key="next_mw", disabled=st.session_state.selected_mw_idx >= len(matchweeks) - 1):
-            st.session_state.selected_mw_idx += 1
-            st.rerun()
-
-    # Content tabs: Results | Season Overview | Value Bets
-    st.markdown("---")
-    content_tab1, content_tab2, content_tab3 = st.tabs(["📋 Results", "📈 Season Overview", "💰 Value Bets"])
-
-    # TAB 1: Matchweek Results
-    with content_tab1:
-        st.subheader(f"Matchweek {selected_mw} Results")
-
+    with st.spinner("Loading results..."):
         results = load_matchweek_results(selected_season, selected_mw)
 
-        if not results:
-            st.info("No matches found for this matchweek")
-        else:
-            # Summary metrics
-            finished = [r for r in results if r["is_finished"]]
-            pending = [r for r in results if not r["is_finished"]]
+    if not results:
+        st.info("No matches found")
+    else:
+        finished = [r for r in results if r["is_finished"]]
+        pending = [r for r in results if not r["is_finished"]]
 
-            # Prediction accuracy
-            correct = 0
-            for r in finished:
-                if r["analysis"] and r["analysis"].consensus_home_prob:
-                    home_prob = float(r["analysis"].consensus_home_prob)
-                    draw_prob = float(r["analysis"].consensus_draw_prob)
-                    away_prob = float(r["analysis"].consensus_away_prob)
+        # Prediction accuracy
+        correct = sum(1 for r in finished if r["analysis"] and (
+            ("home" if r["analysis"]["home_prob"] > r["analysis"]["draw_prob"] and r["analysis"]["home_prob"] > r["analysis"]["away_prob"] else ("away" if r["analysis"]["away_prob"] > r["analysis"]["draw_prob"] else "draw"))
+            == ("home" if r["home_score"] > r["away_score"] else ("away" if r["away_score"] > r["home_score"] else "draw"))
+        ))
 
-                    predicted = "home" if home_prob > draw_prob and home_prob > away_prob else (
-                        "away" if away_prob > draw_prob else "draw"
-                    )
-                    actual = "home" if r["home_score"] > r["away_score"] else (
-                        "away" if r["away_score"] > r["home_score"] else "draw"
-                    )
-                    if predicted == actual:
-                        correct += 1
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Matches", len(results))
+        col2.metric("Completed", len(finished))
+        col3.metric("Pending", len(pending))
+        if finished:
+            col4.metric("Accuracy", f"{correct}/{len(finished)}")
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Matches", len(results))
-            col2.metric("Completed", len(finished))
-            col3.metric("Pending", len(pending))
-            if finished:
-                col4.metric("Accuracy", f"{correct}/{len(finished)} ({100*correct/len(finished):.0f}%)")
+        st.markdown("---")
 
+        for result in results:
+            home_name = teams.get(result["home_team_id"], {}).get("short_name", "?")
+            away_name = teams.get(result["away_team_id"], {}).get("short_name", "?")
+
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+
+            with col1:
+                if result["is_finished"]:
+                    st.markdown(f"**{home_name}** {result['home_score']} - {result['away_score']} **{away_name}**")
+                else:
+                    st.markdown(f"**{home_name}** vs **{away_name}** ({result['kickoff'].strftime('%a %H:%M')})")
+
+            with col2:
+                if result["analysis"]:
+                    a = result["analysis"]
+                    st.caption(f"H {a['home_prob']:.0%} D {a['draw_prob']:.0%} A {a['away_prob']:.0%}")
+
+            with col3:
+                for vb in result["value_bets"][:2]:
+                    st.caption(f"{vb['outcome'][0].upper()} +{vb['edge']:.0%} @ {vb['odds']:.2f}")
+
+            with col4:
+                if result["is_finished"] and result["analysis"]:
+                    a = result["analysis"]
+                    predicted = "home" if a["home_prob"] > a["draw_prob"] and a["home_prob"] > a["away_prob"] else ("away" if a["away_prob"] > a["draw_prob"] else "draw")
+                    actual = "home" if result["home_score"] > result["away_score"] else ("away" if result["away_score"] > result["home_score"] else "draw")
+                    st.markdown("✅" if predicted == actual else "❌")
+
+        # Value bet results
+        vb_results = []
+        for r in finished:
+            if r["value_bets"]:
+                actual = "home_win" if r["home_score"] > r["away_score"] else ("draw" if r["home_score"] == r["away_score"] else "away_win")
+                home = teams.get(r["home_team_id"], {}).get("short_name", "?")
+                away = teams.get(r["away_team_id"], {}).get("short_name", "?")
+                for vb in r["value_bets"]:
+                    won = vb["outcome"] == actual
+                    profit = 10 * (vb["odds"] - 1) if won else -10
+                    vb_results.append({
+                        "Match": f"{home} v {away}",
+                        "Bet": vb["outcome"].replace("_", " ").title(),
+                        "Odds": f"{vb['odds']:.2f}",
+                        "Edge": f"+{vb['edge']:.0%}",
+                        "Result": "✅" if won else "❌",
+                        "P/L": f"£{profit:+.0f}",
+                    })
+
+        if vb_results:
             st.markdown("---")
+            st.subheader("💰 Value Bets")
+            st.dataframe(vb_results, use_container_width=True, hide_index=True)
+            total = sum(float(v["P/L"].replace("£", "").replace("+", "")) for v in vb_results)
+            wins = sum(1 for v in vb_results if v["Result"] == "✅")
+            st.markdown(f"**{wins}/{len(vb_results)} won, £{total:+.0f}**")
 
-            # Results table
-            for result in results:
-                home = teams.get(result["home_team_id"], {})
-                away = teams.get(result["away_team_id"], {})
-                home_name = home.get("short_name", "?")
-                away_name = away.get("short_name", "?")
+with tab2:
+    st.subheader(f"Season Overview - {selected_season}")
 
-                analysis = result["analysis"]
-                value_bets = result["value_bets"]
-
-                col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
-
-                with col1:
-                    if result["is_finished"]:
-                        st.markdown(f"**{home_name}** {result['home_score']} - {result['away_score']} **{away_name}**")
-                    else:
-                        kickoff = result["kickoff"].strftime("%a %H:%M")
-                        st.markdown(f"**{home_name}** vs **{away_name}** ({kickoff})")
-
-                with col2:
-                    if analysis and analysis.consensus_home_prob:
-                        h = float(analysis.consensus_home_prob)
-                        d = float(analysis.consensus_draw_prob)
-                        a = float(analysis.consensus_away_prob)
-                        st.caption(f"Pred: H {h:.0%} D {d:.0%} A {a:.0%}")
-
-                with col3:
-                    if value_bets:
-                        for vb in value_bets[:2]:
-                            outcome_short = {"home_win": "H", "draw": "D", "away_win": "A"}.get(vb.outcome, "?")
-                            edge_pct = float(vb.edge) * 100
-                            st.caption(f"Value: {outcome_short} +{edge_pct:.0f}% @ {float(vb.odds):.2f}")
-
-                with col4:
-                    if result["is_finished"] and analysis and analysis.consensus_home_prob:
-                        home_prob = float(analysis.consensus_home_prob)
-                        draw_prob = float(analysis.consensus_draw_prob)
-                        away_prob = float(analysis.consensus_away_prob)
-
-                        predicted = "home" if home_prob > draw_prob and home_prob > away_prob else (
-                            "away" if away_prob > draw_prob else "draw"
-                        )
-                        actual = "home" if result["home_score"] > result["away_score"] else (
-                            "away" if result["away_score"] > result["home_score"] else "draw"
-                        )
-
-                        if predicted == actual:
-                            st.markdown("✅")
-                        else:
-                            st.markdown("❌")
-
-            # Value bet results for this matchweek
-            value_bet_results = []
-            for result in finished:
-                if result["value_bets"]:
-                    home = teams.get(result["home_team_id"], {}).get("short_name", "?")
-                    away = teams.get(result["away_team_id"], {}).get("short_name", "?")
-
-                    if result["home_score"] > result["away_score"]:
-                        actual = "home_win"
-                    elif result["home_score"] == result["away_score"]:
-                        actual = "draw"
-                    else:
-                        actual = "away_win"
-
-                    for vb in result["value_bets"]:
-                        won = vb.outcome == actual
-                        stake = 10.0
-                        profit = stake * (float(vb.odds) - 1) if won else -stake
-
-                        value_bet_results.append({
-                            "Match": f"{home} v {away}",
-                            "Bet": vb.outcome.replace("_", " ").title(),
-                            "Odds": f"{float(vb.odds):.2f}",
-                            "Edge": f"+{float(vb.edge):.1%}",
-                            "Result": "✅ Won" if won else "❌ Lost",
-                            "Profit": f"£{profit:+.2f}",
-                        })
-
-            if value_bet_results:
-                st.markdown("---")
-                st.subheader("💰 Value Bet Results")
-                st.dataframe(value_bet_results, use_container_width=True, hide_index=True)
-
-                total_profit = sum(float(r["Profit"].replace("£", "").replace("+", "")) for r in value_bet_results)
-                wins = sum(1 for r in value_bet_results if "Won" in r["Result"])
-                st.markdown(f"**Total: {wins}/{len(value_bet_results)} won, £{total_profit:+.2f}**")
-
-    # TAB 2: Season Overview
-    with content_tab2:
-        st.subheader(f"Season Overview - {selected_season}")
-
+    with st.spinner("Loading season data..."):
         mw_stats = load_season_summary(selected_season)
 
-        if not mw_stats:
-            st.info("No completed matches found")
-        else:
-            # Overall metrics
-            total_correct = sum(s["correct"] for s in mw_stats.values())
-            total_matches = sum(s["total"] for s in mw_stats.values())
+    if not mw_stats:
+        st.info("No data found")
+    else:
+        total_correct = sum(s["correct"] for s in mw_stats.values())
+        total_matches = sum(s["total"] for s in mw_stats.values())
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Matches", total_matches)
-            col2.metric("Correct Predictions", total_correct)
-            col3.metric("Overall Accuracy", f"{100*total_correct/total_matches:.1f}%" if total_matches > 0 else "N/A")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Matches", total_matches)
+        col2.metric("Correct", total_correct)
+        col3.metric("Accuracy", f"{100*total_correct/total_matches:.1f}%" if total_matches else "N/A")
 
-            st.markdown("---")
+        chart_data = pd.DataFrame([
+            {"MW": mw, "Accuracy": s["correct"]/s["total"]*100 if s["total"] else 0}
+            for mw, s in sorted(mw_stats.items())
+        ])
+        st.bar_chart(chart_data.set_index("MW"))
 
-            # Accuracy by matchweek chart
-            chart_data = []
-            for mw in sorted(mw_stats.keys()):
-                stats = mw_stats[mw]
-                pct = stats["correct"] / stats["total"] * 100 if stats["total"] > 0 else 0
-                chart_data.append({
-                    "Matchweek": mw,
-                    "Accuracy %": pct,
-                    "Correct": stats["correct"],
-                    "Total": stats["total"],
-                })
+with tab3:
+    st.subheader(f"Value Bet Performance - {selected_season}")
 
-            df = pd.DataFrame(chart_data)
-
-            st.markdown("**Prediction Accuracy by Matchweek**")
-            st.bar_chart(df.set_index("Matchweek")["Accuracy %"])
-
-            # Table
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # TAB 3: Value Bets
-    with content_tab3:
-        st.subheader(f"Value Bet Performance - {selected_season}")
-
+    with st.spinner("Loading value bets..."):
         performance = load_season_value_bets(selected_season)
 
-        if not performance:
-            st.info("No value bets found for this season")
-        else:
-            # Summary metrics
-            total_bets = len(performance)
-            wins = sum(1 for p in performance if p["won"])
-            total_profit = sum(p["profit"] for p in performance)
-            total_staked = total_bets * 10.0
-            roi = (total_profit / total_staked) * 100 if total_staked > 0 else 0
+    if not performance:
+        st.info("No value bets found")
+    else:
+        total_bets = len(performance)
+        wins = sum(1 for p in performance if p["won"])
+        total_profit = sum(p["profit"] for p in performance)
+        roi = total_profit / (total_bets * 10) * 100 if total_bets else 0
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Bets", total_bets)
-            col2.metric("Win Rate", f"{100*wins/total_bets:.1f}%")
-            col3.metric("ROI", f"{roi:+.1f}%")
-            col4.metric("Net Profit", f"£{total_profit:+.2f}")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Bets", total_bets)
+        col2.metric("Win Rate", f"{100*wins/total_bets:.0f}%")
+        col3.metric("ROI", f"{roi:+.1f}%")
+        col4.metric("Profit", f"£{total_profit:+.0f}")
 
-            st.markdown("---")
+        # Cumulative profit
+        mw_profit = defaultdict(float)
+        for p in performance:
+            mw_profit[p["matchweek"]] += p["profit"]
 
-            # Cumulative profit chart
-            mw_perf = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
-            for p in performance:
-                mw_perf[p["matchweek"]]["bets"] += 1
-                if p["won"]:
-                    mw_perf[p["matchweek"]]["wins"] += 1
-                mw_perf[p["matchweek"]]["profit"] += p["profit"]
+        cumulative = []
+        running = 0
+        for mw in sorted(mw_profit.keys()):
+            running += mw_profit[mw]
+            cumulative.append({"MW": mw, "Profit": running})
 
-            chart_data = []
-            cumulative_profit = 0
-            for mw in sorted(mw_perf.keys()):
-                perf = mw_perf[mw]
-                cumulative_profit += perf["profit"]
-                chart_data.append({
-                    "Matchweek": mw,
-                    "Bets": perf["bets"],
-                    "Wins": perf["wins"],
-                    "MW Profit": f"£{perf['profit']:+.2f}",
-                    "Cumulative": cumulative_profit,
+        if cumulative:
+            st.line_chart(pd.DataFrame(cumulative).set_index("MW"))
+
+        # By outcome
+        by_outcome = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
+        for p in performance:
+            by_outcome[p["outcome"]]["bets"] += 1
+            by_outcome[p["outcome"]]["wins"] += int(p["won"])
+            by_outcome[p["outcome"]]["profit"] += p["profit"]
+
+        outcome_data = []
+        for o in ["home_win", "draw", "away_win"]:
+            if o in by_outcome:
+                d = by_outcome[o]
+                outcome_data.append({
+                    "Outcome": o.replace("_", " ").title(),
+                    "Bets": d["bets"],
+                    "Wins": d["wins"],
+                    "ROI": f"{d['profit']/(d['bets']*10)*100:+.0f}%" if d["bets"] else "N/A",
                 })
 
-            df = pd.DataFrame(chart_data)
-
-            st.markdown("**Cumulative Profit**")
-            st.line_chart(df.set_index("Matchweek")["Cumulative"])
-
-            # Performance by matchweek table
-            st.markdown("**Performance by Matchweek**")
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            st.markdown("---")
-
-            # Performance by outcome
-            st.markdown("**Performance by Outcome**")
-            outcome_perf = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
-            for p in performance:
-                outcome_perf[p["outcome"]]["bets"] += 1
-                if p["won"]:
-                    outcome_perf[p["outcome"]]["wins"] += 1
-                outcome_perf[p["outcome"]]["profit"] += p["profit"]
-
-            outcome_data = []
-            for outcome in ["home_win", "draw", "away_win"]:
-                if outcome in outcome_perf:
-                    perf = outcome_perf[outcome]
-                    staked = perf["bets"] * 10.0
-                    outcome_roi = (perf["profit"] / staked) * 100 if staked > 0 else 0
-                    outcome_data.append({
-                        "Outcome": outcome.replace("_", " ").title(),
-                        "Bets": perf["bets"],
-                        "Wins": perf["wins"],
-                        "Win Rate": f"{100*perf['wins']/perf['bets']:.1f}%" if perf["bets"] > 0 else "N/A",
-                        "Profit": f"£{perf['profit']:+.2f}",
-                        "ROI": f"{outcome_roi:+.1f}%",
-                    })
-
-            if outcome_data:
-                st.dataframe(outcome_data, use_container_width=True, hide_index=True)
-
-            st.markdown("---")
-
-            # All bets table
-            with st.expander("All Value Bets", expanded=False):
-                bet_data = []
-                for p in performance:
-                    home = teams.get(p["home_team_id"], {}).get("short_name", "?")
-                    away = teams.get(p["away_team_id"], {}).get("short_name", "?")
-                    bet_data.append({
-                        "MW": p["matchweek"],
-                        "Match": f"{home} v {away}",
-                        "Bet": p["outcome"].replace("_", " ").title(),
-                        "Odds": f"{p['odds']:.2f}",
-                        "Edge": f"+{p['edge']:.1%}",
-                        "Result": "✅" if p["won"] else "❌",
-                        "Profit": f"£{p['profit']:+.2f}",
-                    })
-
-                st.dataframe(bet_data, use_container_width=True, hide_index=True)
+        if outcome_data:
+            st.dataframe(outcome_data, use_container_width=True, hide_index=True)
