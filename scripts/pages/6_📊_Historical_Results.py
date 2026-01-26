@@ -157,12 +157,8 @@ def load_matchweek_results(season: str, matchweek: int):
         # Get match IDs for value bet lookup
         match_ids = [m.id for m, _ in rows]
 
-        # Batch load active value bets only
-        vb_stmt = (
-            select(ValueBet)
-            .where(ValueBet.match_id.in_(match_ids))
-            .where(ValueBet.is_active == True)
-        )
+        # Batch load all value bets (including inactive - historic bets are inactive)
+        vb_stmt = select(ValueBet).where(ValueBet.match_id.in_(match_ids))
         all_value_bets = list(session.execute(vb_stmt).scalars().all())
         vb_by_match = defaultdict(list)
         for vb in all_value_bets:
@@ -217,7 +213,6 @@ def load_season_summary(season: str):
             .join(Match, ValueBet.match_id == Match.id)
             .where(Match.season == season)
             .where(Match.status == MatchStatus.FINISHED)
-            .where(ValueBet.is_active == True)
             .order_by(Match.matchweek)
         )
         vb_rows = list(session.execute(stmt).all())
@@ -285,7 +280,6 @@ def load_season_value_bets(season: str):
             .join(Match, ValueBet.match_id == Match.id)
             .where(Match.season == season)
             .where(Match.status == MatchStatus.FINISHED)
-            .where(ValueBet.is_active == True)
             .order_by(Match.matchweek, Match.kickoff_time)
         )
         rows = list(session.execute(stmt).all())
