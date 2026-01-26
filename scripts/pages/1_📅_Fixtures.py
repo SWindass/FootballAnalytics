@@ -11,28 +11,38 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+st.set_page_config(page_title="Fixtures", page_icon="📅", layout="wide")
+
+# --- Helper Functions ---
+
+def decimal_to_fraction(decimal_odds: float) -> str:
+    """Convert decimal odds to fractional odds."""
+    from fractions import Fraction
+    if decimal_odds <= 1:
+        return "N/A"
+    frac = Fraction(decimal_odds - 1).limit_denominator(100)
+    if frac.denominator == 1:
+        return f"{frac.numerator}/1"
+    return f"{frac.numerator}/{frac.denominator}"
+
 
 def refresh_results_quick():
-    """Quick refresh - fetch latest scores only (no xG, ELO, or retraining)."""
+    """Quick refresh - fetch latest scores only."""
     try:
         import asyncio
         from batch.data_sources.football_data_org import FootballDataClient, parse_match
-        from app.db.models import Match
 
         client = FootballDataClient()
         updated = 0
 
         with SyncSessionLocal() as session:
-            # Fetch recent results (last 7 days)
             date_from = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
             date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             season_year = settings.current_season.split("-")[0]
 
             results = asyncio.run(client.get_matches(
-                season=season_year,
-                status="FINISHED",
-                date_from=date_from,
-                date_to=date_to,
+                season=season_year, status="FINISHED",
+                date_from=date_from, date_to=date_to,
             ))
 
             for result in results:
@@ -45,23 +55,10 @@ def refresh_results_quick():
                     match.status = parsed["status"]
                     match.home_score = parsed.get("home_score")
                     match.away_score = parsed.get("away_score")
-                    match.home_ht_score = parsed.get("home_ht_score")
-                    match.away_ht_score = parsed.get("away_ht_score")
                     updated += 1
 
             session.commit()
-
         return updated
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def refresh_results_full():
-    """Full refresh - scores, xG, ELO, stats, and model retraining."""
-    try:
-        from batch.jobs.results_update import run_results_update
-        result = run_results_update()
-        return result.get("matches_updated", 0)
     except Exception as e:
         return f"Error: {e}"
 
@@ -72,167 +69,22 @@ def refresh_odds_and_predictions():
         from batch.jobs.odds_refresh import run_odds_refresh
         from batch.jobs.weekly_analysis import run_weekly_analysis
 
-        # Step 1: Refresh odds
         odds_result = run_odds_refresh()
-        odds_stored = odds_result.get("odds_stored", 0)
-        value_bets = odds_result.get("value_bets_found", 0)
-
-        # Step 2: Recalculate predictions with new market data
         analysis_result = run_weekly_analysis()
-        analyses = analysis_result.get("analyses_created", 0)
 
         return {
-            "odds_stored": odds_stored,
-            "value_bets": value_bets,
-            "analyses": analyses,
+            "odds_stored": odds_result.get("odds_stored", 0),
+            "value_bets": odds_result.get("value_bets_found", 0),
+            "analyses": analysis_result.get("analyses_created", 0),
         }
     except Exception as e:
         return f"Error: {e}"
 
 
-def refresh_all_narratives(matchweek: int):
-    """Regenerate AI narratives for all matches in a matchweek."""
-    try:
-        import asyncio
-        from batch.ai.narrative_generator import NarrativeGenerator
-        from app.db.models import Match, MatchAnalysis, Team
-
-        generator = NarrativeGenerator()
-        updated = 0
-
-        with SyncSessionLocal() as session:
-            # Get all matches for matchweek
-            stmt = (
-                select(Match)
-                .where(Match.season == settings.current_season)
-                .where(Match.matchweek == matchweek)
-            )
-            matches = list(session.execute(stmt).scalars().all())
-
-            for match in matches:
-                analysis = session.execute(
-                    select(MatchAnalysis).where(MatchAnalysis.match_id == match.id)
-                ).scalar_one_or_none()
-
-                if not analysis:
-                    continue
-
-                # Load teams
-                home_team = session.get(Team, match.home_team_id)
-                away_team = session.get(Team, match.away_team_id)
-
-                # Build data for narrative generator
-                match_data = {
-                    "home_team": home_team.short_name,
-                    "away_team": away_team.short_name,
-                    "kickoff_time": match.kickoff_time,
-                    "venue": home_team.venue or "TBC",
-                }
-
-                # Get probabilities
-                elo_probs = (
-                    float(analysis.elo_home_prob or 0.4),
-                    float(analysis.elo_draw_prob or 0.27),
-                    float(analysis.elo_away_prob or 0.33),
-                )
-                poisson_probs = (
-                    float(analysis.poisson_home_prob or 0.4),
-                    float(analysis.poisson_draw_prob or 0.27),
-                    float(analysis.poisson_away_prob or 0.33),
-                )
-
-                # Get market probs from features
-                market_probs = None
-                if analysis.features:
-                    mkt_home = analysis.features.get("market_home_prob")
-                    mkt_draw = analysis.features.get("market_draw_prob")
-                    mkt_away = analysis.features.get("market_away_prob")
-                    if mkt_home:
-                        market_probs = (mkt_home, mkt_draw, mkt_away)
-
-                # Build consensus predictions
-                predictions = {
-                    "home_win": float(analysis.consensus_home_prob or 0.4),
-                    "draw": float(analysis.consensus_draw_prob or 0.27),
-                    "away_win": float(analysis.consensus_away_prob or 0.33),
-                    "predicted_score": f"{float(analysis.predicted_home_goals or 1.5):.1f}-{float(analysis.predicted_away_goals or 1.0):.1f}",
-                }
-
-                # Build confidence data
-                confidence = float(analysis.confidence or 0)
-                confidence_data = {
-                    "confidence": confidence,
-                    "models_agree": confidence > 0,
-                    "elo_probs": elo_probs,
-                    "poisson_probs": poisson_probs,
-                    "market_probs": market_probs or (0.4, 0.27, 0.33),
-                }
-
-                # Build odds data
-                odds_data = None
-                if market_probs:
-                    odds_data = {
-                        "home_odds": 1 / market_probs[0] if market_probs[0] > 0 else 0,
-                        "draw_odds": 1 / market_probs[1] if market_probs[1] > 0 else 0,
-                        "away_odds": 1 / market_probs[2] if market_probs[2] > 0 else 0,
-                    }
-
-                # Generate narrative
-                narrative = asyncio.run(
-                    generator.generate_match_preview(
-                        match_data=match_data,
-                        home_stats={},
-                        away_stats={},
-                        predictions=predictions,
-                        h2h_history=None,
-                        confidence_data=confidence_data,
-                        odds=odds_data,
-                    )
-                )
-
-                # Save to database
-                analysis.narrative = narrative
-                analysis.narrative_generated_at = datetime.now(timezone.utc)
-                updated += 1
-
-            session.commit()
-
-        return updated
-
-    except Exception as e:
-        return f"Error: {e}"
-
-
-# Standard color scheme
-COLORS = {
-    "home": "#2E86AB",    # Blue
-    "draw": "#A0A0A0",    # Gray
-    "away": "#E94F37",    # Red
-    "accent": "#F9A03F",  # Orange (for highlights)
-}
-
-
-def decimal_to_fraction(decimal_odds: float) -> str:
-    """Convert decimal odds to fractional odds."""
-    from fractions import Fraction
-
-    if decimal_odds <= 1:
-        return "N/A"
-
-    # Convert to fractional: (decimal - 1) as fraction
-    frac = Fraction(decimal_odds - 1).limit_denominator(100)
-
-    if frac.denominator == 1:
-        return f"{frac.numerator}/1"
-
-    return f"{frac.numerator}/{frac.denominator}"
-
-st.set_page_config(page_title="Upcoming Fixtures", page_icon="📅", layout="wide")
-
+# --- Data Loading ---
 
 @st.cache_data(ttl=60)
 def load_teams():
-    """Load teams from database."""
     with SyncSessionLocal() as session:
         teams = list(session.execute(select(Team)).scalars().all())
         return {t.id: {"name": t.name, "short_name": t.short_name} for t in teams}
@@ -240,7 +92,6 @@ def load_teams():
 
 @st.cache_data(ttl=60)
 def load_team_forms():
-    """Load current form (last 5 results) for all teams."""
     from sqlalchemy import func
     with SyncSessionLocal() as session:
         subq = (
@@ -260,15 +111,7 @@ def load_team_forms():
 
 @st.cache_data(ttl=60)
 def get_current_matchweek():
-    """Get the current matchweek number."""
     with SyncSessionLocal() as session:
-        from app.core.config import get_settings
-        settings = get_settings()
-
-        # Find the matchweek with the most recent/upcoming matches
-        now = datetime.now(timezone.utc)
-
-        # First try to find a matchweek with scheduled matches
         stmt = (
             select(Match.matchweek)
             .where(Match.season == settings.current_season)
@@ -277,11 +120,9 @@ def get_current_matchweek():
             .limit(1)
         )
         result = session.execute(stmt).scalar_one_or_none()
-
         if result:
             return result
 
-        # Otherwise get the latest matchweek
         stmt = (
             select(Match.matchweek)
             .where(Match.season == settings.current_season)
@@ -293,11 +134,7 @@ def get_current_matchweek():
 
 @st.cache_data(ttl=60)
 def load_matchweek_fixtures(matchweek: int):
-    """Load all fixtures for a matchweek (completed and upcoming)."""
     with SyncSessionLocal() as session:
-        from app.core.config import get_settings
-        settings = get_settings()
-
         stmt = (
             select(Match)
             .where(Match.season == settings.current_season)
@@ -319,8 +156,6 @@ def load_matchweek_fixtures(matchweek: int):
                 .limit(1)
             ).scalar_one_or_none()
 
-            # Load ALL active value bets for this match
-            # Strategy filtering is done when value bets are created
             from sqlalchemy.orm import joinedload
             value_bets = list(session.execute(
                 select(ValueBet)
@@ -330,12 +165,8 @@ def load_matchweek_fixtures(matchweek: int):
                 .order_by(ValueBet.edge.desc())
             ).scalars().all())
 
-            # Determine status
             status = match.status if hasattr(match.status, 'value') else match.status
-            if isinstance(status, str):
-                is_finished = status.upper() == "FINISHED"
-            else:
-                is_finished = status == MatchStatus.FINISHED
+            is_finished = status == MatchStatus.FINISHED if not isinstance(status, str) else status.upper() == "FINISHED"
 
             fixtures.append({
                 "id": match.id,
@@ -357,7 +188,6 @@ def load_matchweek_fixtures(matchweek: int):
 
 @st.cache_data(ttl=300)
 def load_elo_history(team_id: int, season: str):
-    """Load ELO rating history for a team."""
     with SyncSessionLocal() as session:
         stmt = (
             select(EloRating)
@@ -369,8 +199,307 @@ def load_elo_history(team_id: int, season: str):
         return [{"matchweek": r.matchweek, "rating": float(r.rating)} for r in ratings]
 
 
-def render_elo_chart(home_elo: list, away_elo: list, home_name: str, away_name: str):
-    """Render ELO history chart for two teams."""
+# --- Load Data ---
+
+teams = load_teams()
+team_forms = load_team_forms()
+current_mw = get_current_matchweek()
+fixtures = load_matchweek_fixtures(current_mw)
+
+# --- Sidebar ---
+
+with st.sidebar:
+    st.subheader("Actions")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Scores", use_container_width=True):
+            with st.spinner("Fetching..."):
+                result = refresh_results_quick()
+                if isinstance(result, int) and result > 0:
+                    st.success(f"Updated {result}")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.info("No updates")
+    with col2:
+        if st.button("💰 Odds", use_container_width=True):
+            with st.spinner("Refreshing..."):
+                result = refresh_odds_and_predictions()
+                if isinstance(result, dict):
+                    st.success(f"Done")
+                    st.cache_data.clear()
+                    st.rerun()
+
+    st.divider()
+    st.caption("**Legend**")
+    st.caption("H/D/A = Home/Draw/Away probability")
+    st.caption("💰 = Value bet identified")
+
+
+# --- Main Content ---
+
+if not fixtures:
+    st.info("No fixtures found for this matchweek.")
+    st.stop()
+
+st.title(f"Matchweek {current_mw}")
+
+
+def dedupe_value_bets(value_bets):
+    """Keep best odds per outcome."""
+    best = {}
+    for vb in value_bets:
+        if vb.outcome not in best or float(vb.odds) > float(best[vb.outcome].odds):
+            best[vb.outcome] = vb
+    return list(best.values())
+
+
+def format_outcome(outcome: str) -> str:
+    return {
+        "home_win": "Home", "draw": "Draw", "away_win": "Away",
+        "over_2_5": "O2.5", "under_2_5": "U2.5",
+        "btts_yes": "BTTS Y", "btts_no": "BTTS N",
+    }.get(outcome, outcome)
+
+
+# Build table data
+table_rows = []
+for f in fixtures:
+    home = teams.get(f["home_team_id"], {}).get("short_name", "?")
+    away = teams.get(f["away_team_id"], {}).get("short_name", "?")
+    analysis = f["analysis"]
+    odds = f["odds"]
+    vbs = dedupe_value_bets(f["value_bets"])
+
+    # Time/Score
+    if f["is_finished"]:
+        score = f"{f['home_score']} - {f['away_score']}"
+        time_str = "FT"
+    else:
+        score = "vs"
+        time_str = f["kickoff"].strftime("%a %H:%M")
+
+    # Prediction
+    if analysis and analysis.consensus_home_prob:
+        h_prob = float(analysis.consensus_home_prob)
+        d_prob = float(analysis.consensus_draw_prob)
+        a_prob = float(analysis.consensus_away_prob)
+        pred = f"{h_prob:.0%}/{d_prob:.0%}/{a_prob:.0%}"
+    else:
+        pred = "-"
+
+    # Odds
+    if odds:
+        odds_str = f"{float(odds.home_odds):.2f} / {float(odds.draw_odds):.2f} / {float(odds.away_odds):.2f}"
+    else:
+        odds_str = "-"
+
+    # Value bet
+    if vbs:
+        vb = vbs[0]
+        vb_str = f"{format_outcome(vb.outcome)} +{float(vb.edge):.0%}"
+        vb_class = "vb-yes"
+    else:
+        vb_str = ""
+        vb_class = ""
+
+    table_rows.append({
+        "id": f["id"],
+        "time": time_str,
+        "home": home,
+        "score": score,
+        "away": away,
+        "pred": pred,
+        "odds": odds_str,
+        "vb": vb_str,
+        "vb_class": vb_class,
+        "fixture": f,
+    })
+
+
+# Render HTML table
+css = """
+<style>
+.fixtures-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    background-color: #0e1117;
+    cursor: pointer;
+}
+.fixtures-table th {
+    background-color: #262730;
+    color: #fafafa;
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 2px solid #4a4a5a;
+    font-weight: 600;
+}
+.fixtures-table td {
+    padding: 12px;
+    border-bottom: 1px solid #2a2a3a;
+    color: #fafafa;
+    background-color: #0e1117;
+}
+.fixtures-table tr:hover td {
+    background-color: #1a1a2e;
+}
+.fixtures-table .time {
+    color: #888;
+    font-size: 12px;
+    width: 80px;
+}
+.fixtures-table .team {
+    font-weight: 500;
+}
+.fixtures-table .score {
+    text-align: center;
+    font-weight: bold;
+    width: 60px;
+}
+.fixtures-table .pred {
+    color: #aaa;
+    font-size: 12px;
+}
+.fixtures-table .odds {
+    color: #888;
+    font-size: 12px;
+}
+.fixtures-table .vb-yes {
+    color: #00cc66;
+    font-weight: 600;
+}
+</style>
+"""
+
+html = css + """
+<table class="fixtures-table">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Home</th>
+            <th style="text-align:center"></th>
+            <th>Away</th>
+            <th>Prediction</th>
+            <th>Odds (H/D/A)</th>
+            <th>Value</th>
+        </tr>
+    </thead>
+    <tbody>
+"""
+
+for row in table_rows:
+    html += f"""
+        <tr>
+            <td class="time">{row['time']}</td>
+            <td class="team">{row['home']}</td>
+            <td class="score">{row['score']}</td>
+            <td class="team">{row['away']}</td>
+            <td class="pred">{row['pred']}</td>
+            <td class="odds">{row['odds']}</td>
+            <td class="{row['vb_class']}">{row['vb']}</td>
+        </tr>
+    """
+
+html += """
+    </tbody>
+</table>
+"""
+
+st.html(html)
+
+# Match selector
+st.markdown("---")
+match_options = [f"{teams.get(f['home_team_id'], {}).get('short_name', '?')} vs {teams.get(f['away_team_id'], {}).get('short_name', '?')}" for f in fixtures]
+
+selected_idx = st.selectbox(
+    "Select match for details",
+    range(len(fixtures)),
+    format_func=lambda i: match_options[i],
+    label_visibility="collapsed"
+)
+
+# --- Match Details ---
+
+fixture = fixtures[selected_idx]
+home_name = teams.get(fixture["home_team_id"], {}).get("short_name", "?")
+away_name = teams.get(fixture["away_team_id"], {}).get("short_name", "?")
+analysis = fixture["analysis"]
+odds = fixture["odds"]
+value_bets = dedupe_value_bets(fixture["value_bets"])
+
+st.subheader(f"{home_name} vs {away_name}")
+
+# Value bet callout
+if value_bets and not fixture["is_finished"]:
+    vb = value_bets[0]
+    outcome_map = {
+        "home_win": f"Back {home_name}", "draw": "Back the Draw", "away_win": f"Back {away_name}",
+        "over_2_5": "Over 2.5 Goals", "under_2_5": "Under 2.5 Goals",
+        "btts_yes": "Both Teams to Score", "btts_no": "Both Teams NOT to Score",
+    }
+    outcome_full = outcome_map.get(vb.outcome, vb.outcome.replace("_", " ").title())
+    st.success(f"💰 **{outcome_full}** @ {decimal_to_fraction(float(vb.odds))} ({float(vb.odds):.2f}) — Edge: **+{float(vb.edge):.1%}** • Kelly: {float(vb.kelly_stake):.1%}")
+
+# Three columns: Predictions, Odds, Form
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("**Predictions**")
+    if analysis and analysis.consensus_home_prob:
+        pred_data = []
+        if analysis.elo_home_prob:
+            pred_data.append({"Model": "ELO", "H": f"{float(analysis.elo_home_prob):.0%}", "D": f"{float(analysis.elo_draw_prob):.0%}", "A": f"{float(analysis.elo_away_prob):.0%}"})
+        if analysis.poisson_home_prob:
+            pred_data.append({"Model": "Poisson", "H": f"{float(analysis.poisson_home_prob):.0%}", "D": f"{float(analysis.poisson_draw_prob):.0%}", "A": f"{float(analysis.poisson_away_prob):.0%}"})
+        if analysis.xgboost_home_prob:
+            pred_data.append({"Model": "XGBoost", "H": f"{float(analysis.xgboost_home_prob):.0%}", "D": f"{float(analysis.xgboost_draw_prob):.0%}", "A": f"{float(analysis.xgboost_away_prob):.0%}"})
+        pred_data.append({"Model": "**Consensus**", "H": f"**{float(analysis.consensus_home_prob):.0%}**", "D": f"**{float(analysis.consensus_draw_prob):.0%}**", "A": f"**{float(analysis.consensus_away_prob):.0%}**"})
+        st.dataframe(pred_data, use_container_width=True, hide_index=True)
+
+        if analysis.predicted_home_goals:
+            st.caption(f"Expected Goals: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}")
+    else:
+        st.caption("No predictions available")
+
+with col2:
+    st.markdown("**Odds**")
+    if odds:
+        h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
+        odds_data = [
+            {"": "Decimal", "Home": f"{h:.2f}", "Draw": f"{d:.2f}", "Away": f"{a:.2f}"},
+            {"": "Fractional", "Home": decimal_to_fraction(h), "Draw": decimal_to_fraction(d), "Away": decimal_to_fraction(a)},
+            {"": "Implied %", "Home": f"{1/h:.0%}", "Draw": f"{1/d:.0%}", "Away": f"{1/a:.0%}"},
+        ]
+        st.dataframe(odds_data, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No odds available")
+
+with col3:
+    st.markdown("**Form (Last 5)**")
+    home_form = team_forms.get(fixture["home_team_id"], "")
+    away_form = team_forms.get(fixture["away_team_id"], "")
+
+    def style_form(form: str) -> str:
+        styled = ""
+        for c in form:
+            if c == "W":
+                styled += "🟢"
+            elif c == "D":
+                styled += "🟡"
+            elif c == "L":
+                styled += "🔴"
+        return styled
+
+    st.markdown(f"**{home_name}**: {style_form(home_form)} ({home_form})")
+    st.markdown(f"**{away_name}**: {style_form(away_form)} ({away_form})")
+
+# ELO Chart
+home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
+away_elo = load_elo_history(fixture["away_team_id"], fixture["season"])
+
+if home_elo or away_elo:
+    st.markdown("**ELO Ratings**")
     fig = go.Figure()
 
     if home_elo:
@@ -379,7 +508,7 @@ def render_elo_chart(home_elo: list, away_elo: list, home_name: str, away_name: 
             y=[e["rating"] for e in home_elo],
             mode='lines+markers',
             name=home_name,
-            line=dict(color=COLORS["home"], width=2),
+            line=dict(color='#2E86AB', width=2),
             marker=dict(size=5),
         ))
 
@@ -389,451 +518,23 @@ def render_elo_chart(home_elo: list, away_elo: list, home_name: str, away_name: 
             y=[e["rating"] for e in away_elo],
             mode='lines+markers',
             name=away_name,
-            line=dict(color=COLORS["away"], width=2),
+            line=dict(color='#E94F37', width=2),
             marker=dict(size=5),
         ))
 
+    fig.add_hline(y=1500, line_dash="dash", line_color="gray", opacity=0.5)
     fig.update_layout(
-        height=200,
-        margin=dict(l=0, r=0, t=30, b=0),
+        height=250,
+        margin=dict(l=0, r=0, t=10, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         xaxis=dict(title="Matchweek", dtick=5),
-        yaxis=dict(title="ELO"),
+        yaxis=dict(title="ELO Rating"),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
     )
+    st.plotly_chart(fig, use_container_width=True)
 
-    return fig
-
-
-def render_probability_bar(home_prob: float, draw_prob: float, away_prob: float):
-    """Render a compact horizontal probability bar."""
-    fig = go.Figure()
-
-    fig.add_trace(go.Bar(
-        y=[""],
-        x=[home_prob * 100],
-        orientation='h',
-        name="Home",
-        marker_color=COLORS["home"],
-        text=f"H {home_prob:.0%}",
-        textposition='inside',
-        textfont=dict(color='white', size=11),
-        hovertemplate=f"Home: {home_prob:.1%}<extra></extra>",
-    ))
-
-    fig.add_trace(go.Bar(
-        y=[""],
-        x=[draw_prob * 100],
-        orientation='h',
-        name="Draw",
-        marker_color=COLORS["draw"],
-        text=f"D {draw_prob:.0%}",
-        textposition='inside',
-        textfont=dict(color='white', size=11),
-        hovertemplate=f"Draw: {draw_prob:.1%}<extra></extra>",
-    ))
-
-    fig.add_trace(go.Bar(
-        y=[""],
-        x=[away_prob * 100],
-        orientation='h',
-        name="Away",
-        marker_color=COLORS["away"],
-        text=f"A {away_prob:.0%}",
-        textposition='inside',
-        textfont=dict(color='white', size=11),
-        hovertemplate=f"Away: {away_prob:.1%}<extra></extra>",
-    ))
-
-    fig.update_layout(
-        barmode='stack',
-        height=35,
-        margin=dict(l=0, r=0, t=0, b=0),
-        showlegend=False,
-        xaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 100]),
-        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-    )
-
-    return fig
-
-
-# Load data
-teams = load_teams()
-team_forms = load_team_forms()
-
-# Get current matchweek early for sidebar button
-current_mw = get_current_matchweek()
-
-# Sidebar
-with st.sidebar:
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 Scores", use_container_width=True, help="Quick refresh - scores only"):
-            with st.spinner("Fetching scores..."):
-                result = refresh_results_quick()
-                if isinstance(result, int):
-                    if result > 0:
-                        st.success(f"Updated {result}")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.info("No new results")
-                else:
-                    st.error(result)
-    with col2:
-        if st.button("🔄 Full", use_container_width=True, help="Full refresh - scores, xG, ELO, stats"):
-            with st.spinner("Full refresh (this takes a while)..."):
-                result = refresh_results_full()
-                if isinstance(result, int):
-                    if result > 0:
-                        st.success(f"Updated {result}")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.info("No new results")
-                else:
-                    st.error(result)
-
-    if st.button("🤖 Refresh AI Synopsis", use_container_width=True):
-        with st.spinner(f"Regenerating narratives for MW{current_mw}..."):
-            result = refresh_all_narratives(current_mw)
-            if isinstance(result, int):
-                st.success(f"Updated {result} synopses")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error(result)
-
-    if st.button("💰 Refresh Odds & Predictions", use_container_width=True):
-        with st.spinner("Fetching odds and recalculating predictions..."):
-            result = refresh_odds_and_predictions()
-            if isinstance(result, dict):
-                st.success(f"Odds: {result['odds_stored']} | Value bets: {result['value_bets']} | Predictions: {result['analyses']}")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error(result)
-
-    st.divider()
-    with st.expander("Glossary", expanded=False):
-        st.markdown("""
-**Edge**
-The advantage you have over the bookmaker. Calculated as:
-`Model Probability - Implied Probability`
-E.g., if our model says 60% but odds imply 50%, edge = 10%
-
----
-**Kelly Stake**
-Optimal bet size based on your edge and the odds. Formula:
-`(Edge × Odds - 1) / (Odds - 1)`
-We use 0.25 fractional Kelly (25% of full Kelly) to reduce variance.
-
----
-**Implied Probability**
-What the bookmaker's odds suggest the true probability is:
-`1 / Decimal Odds`
-E.g., odds of 2.00 imply 50% probability
-
----
-**ELO Rating**
-A strength rating system (like chess). Higher = stronger team.
-Average is ~1500. Top teams: 1700+, Relegation zone: <1400
-
----
-**xG (Expected Goals)**
-Statistical measure of chance quality. An xG of 1.5 means the chances created would typically result in 1.5 goals.
-
----
-**Poisson Model**
-Predicts goals using average scoring rates. Assumes goals follow a Poisson distribution.
-
----
-**BTTS**
-Both Teams To Score - a bet that both teams will score at least one goal.
-
----
-**Over/Under 2.5**
-A bet on whether the total goals will be over or under 2.5 (i.e., 3+ goals or 0-2 goals).
-        """)
-
-    with st.expander("Models & Strategy"):
-        st.markdown("""
-**Consensus** combines three models:
-- **ELO** (35%): Team strength ratings
-- **Poisson** (40%): Goal distribution model
-- **XGBoost** (25%): ML classifier
-
-**Value Bet Strategies** (backtest-validated):
-
-*Away Wins (5-12% edge)*
-- Backtest: +20% ROI, 51.6% win rate
-- Higher edges (>12%) are overconfident
-
-*Home Wins (filtered)*
-- Only odds < 1.70 (short favorites)
-- Only edge >= 10%
-- Only reliable teams (tracked automatically)
-- Backtest: +21% ROI, 83% win rate
-        """)
-
-# Load fixtures for current matchweek
-fixtures = load_matchweek_fixtures(current_mw)
-
-if not fixtures:
-    st.info("No fixtures found for this matchweek.")
-    st.stop()
-
-st.title(f"Fixtures - Match Week {current_mw}")
-
-# Group by date
-fixtures_by_date = {}
-for f in fixtures:
-    date_str = f["kickoff"].strftime("%a %d %b")
-    if date_str not in fixtures_by_date:
-        fixtures_by_date[date_str] = []
-    fixtures_by_date[date_str].append(f)
-
-# Render fixtures
-for date_str, day_fixtures in fixtures_by_date.items():
-    st.markdown(f"**{date_str}**")
-
-    for fixture in day_fixtures:
-        home = teams.get(fixture["home_team_id"], {})
-        away = teams.get(fixture["away_team_id"], {})
-        home_name = home.get("short_name", "?")
-        away_name = away.get("short_name", "?")
-        kickoff_time = fixture["kickoff"].strftime("%H:%M")
-
-        analysis = fixture["analysis"]
-        odds = fixture["odds"]
-        value_bets = fixture["value_bets"]
-
-        is_finished = fixture.get("is_finished", False)
-
-        # Compact match row
-        c1, c2, c3, c4, c5 = st.columns([2.5, 2, 0.3, 2, 0.8])
-
-        with c1:
-            home_form = team_forms.get(fixture["home_team_id"], "")
-            away_form = team_forms.get(fixture["away_team_id"], "")
-            form_str = f"{home_form} v {away_form}" if home_form or away_form else ""
-
-            if is_finished:
-                home_score = fixture.get("home_score", 0)
-                away_score = fixture.get("away_score", 0)
-                st.markdown(f"**{home_name}** {home_score} - {away_score} **{away_name}**")
-                st.caption(f"FT • {kickoff_time}" + (f" • Form: {form_str}" if form_str else ""))
-            else:
-                # Add VALUE BET indicator if value bet exists
-                if value_bets:
-                    st.markdown(f"**{home_name}** vs **{away_name}** :green-background[💰 VALUE]")
-                else:
-                    st.markdown(f"**{home_name}** vs **{away_name}**")
-                st.caption(kickoff_time + (f" • Form: {form_str}" if form_str else ""))
-
-        with c2:
-            st.caption("Prediction")
-            if analysis and analysis.consensus_home_prob:
-                prob_fig = render_probability_bar(
-                    float(analysis.consensus_home_prob),
-                    float(analysis.consensus_draw_prob),
-                    float(analysis.consensus_away_prob)
-                )
-                st.plotly_chart(prob_fig, use_container_width=True, key=f"prob_{fixture['id']}")
-            if analysis and analysis.predicted_home_goals:
-                st.markdown(f"**xG: {float(analysis.predicted_home_goals):.1f} - {float(analysis.predicted_away_goals):.1f}**")
-
-        with c3:
-            st.markdown("<div style='border-left: 2px solid #ddd; height: 100px; margin: 0 auto; width: 1px;'></div>", unsafe_allow_html=True)
-
-        with c4:
-            if is_finished:
-                # Show result summary for finished matches
-                home_score = fixture.get("home_score", 0)
-                away_score = fixture.get("away_score", 0)
-                if home_score > away_score:
-                    result = f"{home_name} Win"
-                elif away_score > home_score:
-                    result = f"{away_name} Win"
-                else:
-                    result = "Draw"
-                st.caption("Result")
-                st.markdown(f"**{result}**")
-            elif odds:
-                h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
-                st.caption("Best Odds")
-                odds_df = {
-                    "": ["Frac", "Dec"],
-                    "Home": [decimal_to_fraction(h), f"{h:.2f}"],
-                    "Draw": [decimal_to_fraction(d), f"{d:.2f}"],
-                    "Away": [decimal_to_fraction(a), f"{a:.2f}"],
-                }
-                st.dataframe(odds_df, hide_index=True, height=107)
-
-        with c5:
-            if is_finished:
-                # Show if prediction was correct
-                if analysis and analysis.consensus_home_prob:
-                    home_score = fixture.get("home_score", 0)
-                    away_score = fixture.get("away_score", 0)
-                    home_prob = float(analysis.consensus_home_prob)
-                    draw_prob = float(analysis.consensus_draw_prob)
-                    away_prob = float(analysis.consensus_away_prob)
-
-                    predicted = "home" if home_prob > draw_prob and home_prob > away_prob else ("away" if away_prob > draw_prob else "draw")
-                    actual = "home" if home_score > away_score else ("away" if away_score > home_score else "draw")
-
-                    if predicted == actual:
-                        st.markdown("✅")
-                    else:
-                        st.markdown("❌")
-
-        # Deduplicate value bets - keep best odds per outcome
-        unique_value_bets = {}
-        for vb in value_bets:
-            outcome = vb.outcome
-            if outcome not in unique_value_bets or float(vb.odds) > float(unique_value_bets[outcome].odds):
-                unique_value_bets[outcome] = vb
-        value_bets_deduped = list(unique_value_bets.values())
-
-        # Show prominent value bet callout for upcoming matches
-        if not is_finished and value_bets_deduped:
-            best = value_bets_deduped[0]
-            outcome_map = {
-                "home_win": f"Back {home_name}",
-                "draw": "Back the Draw",
-                "away_win": f"Back {away_name}",
-                "over_2_5": "Over 2.5 Goals",
-                "under_2_5": "Under 2.5 Goals",
-                "btts_yes": "Both Teams to Score",
-                "btts_no": "Both Teams NOT to Score",
-            }
-            outcome_full = outcome_map.get(best.outcome, best.outcome.replace("_", " ").title())
-            odds_dec = float(best.odds)
-            odds_frac = decimal_to_fraction(odds_dec)
-            edge_pct = float(best.edge)
-            kelly = float(best.kelly_stake)
-
-            st.success(f"💰 **VALUE BET: {outcome_full}** @ {odds_frac} ({odds_dec:.2f}) — Edge: **+{edge_pct:.1%}** • Kelly stake: {kelly:.1%}")
-
-        # Expandable details
-        if analysis and analysis.consensus_home_prob:
-            with st.expander("Details", expanded=False):
-                # Model comparison in compact table
-                model_data = []
-                if analysis.elo_home_prob:
-                    model_data.append({
-                        "Model": "ELO",
-                        "Home": f"{float(analysis.elo_home_prob):.0%}",
-                        "Draw": f"{float(analysis.elo_draw_prob):.0%}",
-                        "Away": f"{float(analysis.elo_away_prob):.0%}",
-                    })
-                if analysis.poisson_home_prob:
-                    model_data.append({
-                        "Model": "Poisson",
-                        "Home": f"{float(analysis.poisson_home_prob):.0%}",
-                        "Draw": f"{float(analysis.poisson_draw_prob):.0%}",
-                        "Away": f"{float(analysis.poisson_away_prob):.0%}",
-                    })
-                if analysis.xgboost_home_prob:
-                    model_data.append({
-                        "Model": "XGBoost",
-                        "Home": f"{float(analysis.xgboost_home_prob):.0%}",
-                        "Draw": f"{float(analysis.xgboost_draw_prob):.0%}",
-                        "Away": f"{float(analysis.xgboost_away_prob):.0%}",
-                    })
-                model_data.append({
-                    "Model": "**Consensus**",
-                    "Home": f"**{float(analysis.consensus_home_prob):.0%}**",
-                    "Draw": f"**{float(analysis.consensus_draw_prob):.0%}**",
-                    "Away": f"**{float(analysis.consensus_away_prob):.0%}**",
-                })
-
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    st.dataframe(model_data, use_container_width=True, hide_index=True)
-
-                with col2:
-                    extras = []
-                    if analysis.poisson_over_2_5_prob:
-                        extras.append(f"Over 2.5: {float(analysis.poisson_over_2_5_prob):.0%}")
-                    if analysis.poisson_btts_prob:
-                        extras.append(f"BTTS: {float(analysis.poisson_btts_prob):.0%}")
-                    if extras:
-                        st.markdown(" | ".join(extras))
-
-                    if value_bets_deduped:
-                        st.markdown("**💰 Value Bets:**")
-                        for vb in value_bets_deduped:
-                            outcome = vb.outcome.replace("_", " ").title()
-                            odds_dec = float(vb.odds)
-                            odds_frac = decimal_to_fraction(odds_dec)
-                            strategy_name = ""
-                            if hasattr(vb, 'strategy') and vb.strategy:
-                                strategy_name = f" [{vb.strategy.name.replace('_', ' ').title()}]"
-                            st.markdown(f"- **{outcome}** @ {odds_frac} ({odds_dec:.2f}) — **+{float(vb.edge):.1%} edge** • Kelly: {float(vb.kelly_stake):.1%}{strategy_name}")
-
-                # ELO History Chart
-                home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
-                away_elo = load_elo_history(fixture["away_team_id"], fixture["season"])
-                if home_elo or away_elo:
-                    st.markdown("---")
-                    st.markdown("**ELO Rating History**")
-                    elo_fig = render_elo_chart(home_elo, away_elo, home_name, away_name)
-                    st.plotly_chart(elo_fig, use_container_width=True, key=f"elo_{fixture['id']}")
-
-                # AI Narrative
-                if analysis.narrative:
-                    st.markdown("---")
-                    st.markdown("**AI Synopsis**")
-                    st.markdown(analysis.narrative)
-
-    st.divider()
-
-# Value bets summary
-if any(f["value_bets"] for f in fixtures):
-    st.markdown("### 💰 Value Bets")
-    st.success(
-        "Two backtest-validated strategies:\n\n"
-        "**Away wins** (5-12% edge): +20% ROI, 51.6% win rate\n\n"
-        "**Home wins** (odds < 1.70, edge ≥ 10%, reliable teams): +21% ROI, 83% win rate"
-    )
-
-    # Deduplicate: keep best odds per match+outcome
-    best_bets = {}  # (match_id, outcome) -> best value bet
-    for f in fixtures:
-        for vb in f["value_bets"]:
-            key = (f["id"], vb.outcome)
-            if key not in best_bets or float(vb.odds) > float(best_bets[key]["vb"].odds):
-                best_bets[key] = {"fixture": f, "vb": vb}
-
-    unique = []
-    for (match_id, outcome), data in best_bets.items():
-        f = data["fixture"]
-        vb = data["vb"]
-        home = teams.get(f["home_team_id"], {}).get("short_name", "?")
-        away = teams.get(f["away_team_id"], {}).get("short_name", "?")
-        odds_dec = float(vb.odds)
-        bet_type = {"home_win": "Home Win", "away_win": "Away Win", "draw": "Draw"}.get(vb.outcome, vb.outcome)
-        strategy_name = ""
-        if hasattr(vb, 'strategy') and vb.strategy:
-            strategy_name = vb.strategy.name.replace('_', ' ').title()
-        unique.append({
-            "Match": f"{home} v {away}",
-            "Kick-off": f["kickoff"].strftime("%a %H:%M"),
-            "Bet": bet_type,
-            "Odds": f"{decimal_to_fraction(odds_dec)} ({odds_dec:.2f})",
-            "Edge": f"+{float(vb.edge):.1%}",
-            "Kelly": f"{float(vb.kelly_stake):.1%}",
-            "Strategy": strategy_name or "-",
-        })
-
-    unique.sort(key=lambda x: float(x["Edge"].lstrip("+").rstrip("%")), reverse=True)
-
-    if unique:
-        st.dataframe(unique, use_container_width=True, hide_index=True)
-        total_kelly = sum(float(vb["Kelly"].rstrip("%")) for vb in unique)
-        st.markdown(f"**Total recommended stake: {total_kelly:.1f}%** of bankroll across {len(unique)} bets")
+# AI Synopsis
+if analysis and analysis.narrative:
+    with st.expander("AI Synopsis", expanded=False):
+        st.markdown(analysis.narrative)
