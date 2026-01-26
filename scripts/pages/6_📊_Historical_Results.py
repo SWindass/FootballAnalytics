@@ -50,6 +50,35 @@ def get_matchweeks_for_season(season: str):
 
 
 @st.cache_data(ttl=60)
+def get_current_matchweek():
+    """Get the current matchweek number for the current season."""
+    with SyncSessionLocal() as session:
+        now = datetime.now(timezone.utc)
+
+        # Find matchweek with scheduled matches (upcoming)
+        stmt = (
+            select(Match.matchweek)
+            .where(Match.season == settings.current_season)
+            .where(Match.status == MatchStatus.SCHEDULED)
+            .order_by(Match.kickoff_time)
+            .limit(1)
+        )
+        result = session.execute(stmt).scalar_one_or_none()
+        if result:
+            return result
+
+        # Otherwise get the latest matchweek with finished matches
+        stmt = (
+            select(Match.matchweek)
+            .where(Match.season == settings.current_season)
+            .where(Match.status == MatchStatus.FINISHED)
+            .order_by(Match.matchweek.desc())
+            .limit(1)
+        )
+        return session.execute(stmt).scalar_one_or_none()
+
+
+@st.cache_data(ttl=60)
 def load_matchweek_results(season: str, matchweek: int):
     """Load results for a specific matchweek with single query."""
     with SyncSessionLocal() as session:
@@ -242,7 +271,12 @@ if not matchweeks:
 
 # Initialize/validate matchweek
 if st.session_state.hist_mw is None or st.session_state.hist_mw not in matchweeks:
-    st.session_state.hist_mw = matchweeks[-1]  # Default to last matchweek
+    # Default to current matchweek if on current season, otherwise last matchweek
+    if selected_season == settings.current_season:
+        current_mw = get_current_matchweek()
+        st.session_state.hist_mw = current_mw if current_mw in matchweeks else matchweeks[-1]
+    else:
+        st.session_state.hist_mw = matchweeks[-1]
 
 with col4:
     mw_idx = matchweeks.index(st.session_state.hist_mw)
