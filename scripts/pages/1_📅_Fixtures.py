@@ -491,8 +491,11 @@ with col3:
                 styled += "🔴"
         return styled
 
-    st.markdown(f"**{home_name}**: {style_form(home_form)} ({home_form})")
-    st.markdown(f"**{away_name}**: {style_form(away_form)} ({away_form})")
+    form_data = [
+        {"Team": home_name, "Form": style_form(home_form), "": home_form},
+        {"Team": away_name, "Form": style_form(away_form), "": away_form},
+    ]
+    st.dataframe(form_data, use_container_width=True, hide_index=True)
 
 # ELO Chart
 home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
