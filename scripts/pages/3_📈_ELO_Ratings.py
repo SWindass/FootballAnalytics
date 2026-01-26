@@ -40,6 +40,7 @@ def load_data():
                 "season": r.season,
                 "matchweek": r.matchweek,
                 "rating": float(r.rating),
+                "rating_change": float(r.rating_change) if r.rating_change else 0,
             })
 
         return team_dict, data
@@ -72,7 +73,7 @@ if view_mode == "Single Season":
 else:
     selected_season = None
 
-# Filter data
+# Filter data by season
 if view_mode == "Single Season":
     season_data = [r for r in ratings_data if r["season"] == selected_season]
     if not season_data:
@@ -84,117 +85,140 @@ else:
 matchweeks = sorted(set(r["matchweek"] for r in season_data))
 min_mw, max_mw = min(matchweeks), max(matchweeks)
 
+# Matchweek selector for single season view
 if view_mode == "Single Season":
-    mw_range = st.sidebar.slider("Matchweek Range", min_value=min_mw, max_value=max_mw, value=(min_mw, max_mw))
+    selected_matchweek = st.sidebar.slider(
+        "View Table at Matchweek",
+        min_value=min_mw,
+        max_value=max_mw,
+        value=max_mw
+    )
+    mw_range = st.sidebar.slider(
+        "Chart Matchweek Range",
+        min_value=min_mw,
+        max_value=max_mw,
+        value=(min_mw, max_mw)
+    )
 else:
+    selected_matchweek = max_mw
     mw_range = (min_mw, max_mw)
 
-# Get teams sorted by current rating
-teams_in_data = sorted(set(r["short_name"] for r in season_data))
-latest_season = max(seasons)
-latest_data = [r for r in ratings_data if r["season"] == latest_season]
-
-if latest_data:
-    max_mw_latest = max(r["matchweek"] for r in latest_data)
-    current_ratings = {r["short_name"]: r["rating"] for r in latest_data if r["matchweek"] == max_mw_latest}
-    teams_in_data = sorted(teams_in_data, key=lambda t: current_ratings.get(t, 0), reverse=True)
-    top_teams = teams_in_data[:6]
-else:
-    top_teams = teams_in_data[:6]
-    current_ratings = {}
-
-# Team selector
-st.sidebar.markdown("**Select Teams**")
-col1, col2 = st.sidebar.columns(2)
-if col1.button("Top 6", use_container_width=True):
-    st.session_state.selected_teams = set(top_teams)
-if col2.button("Clear", use_container_width=True):
-    st.session_state.selected_teams = set()
-
-if "selected_teams" not in st.session_state:
-    st.session_state.selected_teams = set(top_teams)
-
-with st.sidebar.expander("Teams", expanded=True):
-    selected_teams = []
-    for team in teams_in_data:
-        default = team in st.session_state.selected_teams
-        if st.checkbox(team, value=default, key=f"team_{team}"):
-            selected_teams.append(team)
-    st.session_state.selected_teams = set(selected_teams)
-
-if not selected_teams:
-    st.info("Select at least one team to display.")
-    st.stop()
-
-# Filter data
-filtered_data = [
-    r for r in season_data
-    if r["short_name"] in selected_teams
-    and mw_range[0] <= r["matchweek"] <= mw_range[1]
-]
-
-# Build chart
-fig = go.Figure()
+# Build league table - get most recent rating for each team up to selected matchweek
+def get_latest_ratings(data, up_to_matchweek):
+    """Get most recent rating for each team up to a given matchweek."""
+    team_latest = {}
+    for r in data:
+        if r["matchweek"] <= up_to_matchweek:
+            team = r["short_name"]
+            if team not in team_latest or r["matchweek"] > team_latest[team]["matchweek"]:
+                team_latest[team] = r
+    return list(team_latest.values())
 
 if view_mode == "Single Season":
-    for team_name in selected_teams:
-        team_data = sorted([r for r in filtered_data if r["short_name"] == team_name], key=lambda r: r["matchweek"])
-        if not team_data:
-            continue
-
-        mws = [r["matchweek"] for r in team_data]
-        elos = [r["rating"] for r in team_data]
-        final_elo = elos[-1] if elos else 1500
-
-        fig.add_trace(go.Scatter(
-            x=mws,
-            y=elos,
-            mode='lines+markers',
-            name=f"{team_name} ({final_elo:.0f})",
-            line=dict(color=get_team_color(team_name), width=2.5),
-            marker=dict(size=6),
-            hovertemplate=f"<b>{team_name}</b><br>Matchweek: %{{x}}<br>ELO: %{{y:.1f}}<extra></extra>",
-        ))
-
-    fig.update_xaxes(dtick=2, range=[mw_range[0] - 0.5, mw_range[1] + 0.5])
-    chart_title = f"ELO Ratings - {selected_season} Season"
-    x_title = "Matchweek"
+    table_data = get_latest_ratings(season_data, selected_matchweek)
 else:
-    season_order = sorted(seasons)
-    for team_name in selected_teams:
-        team_data = sorted([r for r in filtered_data if r["short_name"] == team_name], key=lambda r: (r["season"], r["matchweek"]))
-        if not team_data:
-            continue
+    # For all seasons view, use most recent matchweek of the latest season
+    latest_season = max(seasons)
+    latest_season_data = [r for r in ratings_data if r["season"] == latest_season]
+    latest_mw = max(r["matchweek"] for r in latest_season_data)
+    table_data = get_latest_ratings(latest_season_data, latest_mw)
 
-        x_vals = []
-        x_labels = []
-        elos = []
-        for r in team_data:
-            season_idx = season_order.index(r["season"])
-            x_numeric = season_idx * 38 + r["matchweek"]
-            x_vals.append(x_numeric)
-            x_labels.append(f"{r['season']} MW{r['matchweek']}")
-            elos.append(r["rating"])
+# Sort by ELO rating (league position proxy)
+table_data = sorted(table_data, key=lambda r: r["rating"], reverse=True)
+teams_in_data = [r["short_name"] for r in table_data]
 
-        final_elo = elos[-1] if elos else 1500
+# Initialize selected teams in session state
+if "selected_teams" not in st.session_state:
+    st.session_state.selected_teams = set(teams_in_data[:6])  # Default top 6
 
-        fig.add_trace(go.Scatter(
-            x=x_vals,
-            y=elos,
-            mode='lines',
-            name=f"{team_name} ({final_elo:.0f})",
-            line=dict(color=get_team_color(team_name), width=2),
-            hovertemplate=f"<b>{team_name}</b><br>%{{text}}<br>ELO: %{{y:.1f}}<extra></extra>",
-            text=x_labels,
-        ))
+# Quick select buttons
+st.sidebar.markdown("**Quick Select**")
+col1, col2, col3 = st.sidebar.columns(3)
+if col1.button("Top 6", use_container_width=True):
+    st.session_state.selected_teams = set(teams_in_data[:6])
+    st.rerun()
+if col2.button("All", use_container_width=True):
+    st.session_state.selected_teams = set(teams_in_data)
+    st.rerun()
+if col3.button("Clear", use_container_width=True):
+    st.session_state.selected_teams = set()
+    st.rerun()
 
-    for i in range(1, len(season_order)):
-        fig.add_vline(x=i * 38 + 0.5, line_dash="dash", line_color="gray", opacity=0.3)
+# Get currently selected teams
+selected_teams = list(st.session_state.selected_teams)
 
-    tickvals = [i * 38 + 19 for i in range(len(season_order))]
-    fig.update_xaxes(tickvals=tickvals, ticktext=season_order)
-    chart_title = "ELO Ratings - All Seasons (with carryover)"
-    x_title = "Season"
+# Build chart with selected teams
+fig = go.Figure()
+
+if selected_teams:
+    filtered_data = [
+        r for r in season_data
+        if r["short_name"] in selected_teams
+        and mw_range[0] <= r["matchweek"] <= mw_range[1]
+    ]
+
+    if view_mode == "Single Season":
+        for team_name in selected_teams:
+            team_data = sorted([r for r in filtered_data if r["short_name"] == team_name], key=lambda r: r["matchweek"])
+            if not team_data:
+                continue
+
+            mws = [r["matchweek"] for r in team_data]
+            elos = [r["rating"] for r in team_data]
+            final_elo = elos[-1] if elos else 1500
+
+            fig.add_trace(go.Scatter(
+                x=mws,
+                y=elos,
+                mode='lines+markers',
+                name=f"{team_name} ({final_elo:.0f})",
+                line=dict(color=get_team_color(team_name), width=2.5),
+                marker=dict(size=6),
+                hovertemplate=f"<b>{team_name}</b><br>Matchweek: %{{x}}<br>ELO: %{{y:.1f}}<extra></extra>",
+            ))
+
+        fig.update_xaxes(dtick=2, range=[mw_range[0] - 0.5, mw_range[1] + 0.5])
+        chart_title = f"ELO Ratings - {selected_season} Season"
+        x_title = "Matchweek"
+    else:
+        season_order = sorted(seasons)
+        for team_name in selected_teams:
+            team_data = sorted([r for r in filtered_data if r["short_name"] == team_name], key=lambda r: (r["season"], r["matchweek"]))
+            if not team_data:
+                continue
+
+            x_vals = []
+            x_labels = []
+            elos = []
+            for r in team_data:
+                season_idx = season_order.index(r["season"])
+                x_numeric = season_idx * 38 + r["matchweek"]
+                x_vals.append(x_numeric)
+                x_labels.append(f"{r['season']} MW{r['matchweek']}")
+                elos.append(r["rating"])
+
+            final_elo = elos[-1] if elos else 1500
+
+            fig.add_trace(go.Scatter(
+                x=x_vals,
+                y=elos,
+                mode='lines',
+                name=f"{team_name} ({final_elo:.0f})",
+                line=dict(color=get_team_color(team_name), width=2),
+                hovertemplate=f"<b>{team_name}</b><br>%{{text}}<br>ELO: %{{y:.1f}}<extra></extra>",
+                text=x_labels,
+            ))
+
+        for i in range(1, len(season_order)):
+            fig.add_vline(x=i * 38 + 0.5, line_dash="dash", line_color="gray", opacity=0.3)
+
+        tickvals = [i * 38 + 19 for i in range(len(season_order))]
+        fig.update_xaxes(tickvals=tickvals, ticktext=season_order)
+        chart_title = "ELO Ratings - All Seasons (with carryover)"
+        x_title = "Season"
+else:
+    chart_title = "ELO Ratings - Select teams from the table below"
+    x_title = "Matchweek"
 
 fig.add_hline(y=1500, line_dash="dash", line_color="gray", opacity=0.5, annotation_text="Baseline (1500)", annotation_position="bottom right")
 
@@ -204,42 +228,127 @@ fig.update_layout(
     yaxis_title="ELO Rating",
     hovermode="x unified",
     legend=dict(yanchor="top", y=0.99, xanchor="left", x=1.02),
-    height=600,
+    height=550,
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Stats table
+# League table with checkboxes
 if view_mode == "Single Season":
-    st.subheader(f"Season Summary - {selected_season}")
+    st.subheader(f"League Table by ELO - Matchweek {selected_matchweek}")
 else:
-    st.subheader("Overall Summary (All Seasons)")
+    st.subheader(f"Current ELO Rankings")
 
-summary_data = []
-for team_name in selected_teams:
-    team_data = sorted([r for r in season_data if r["short_name"] == team_name], key=lambda r: (r["season"], r["matchweek"]))
-    if not team_data:
-        continue
+st.caption("Select teams to add to the chart above")
 
-    start_elo = team_data[0]["rating"]
-    end_elo = team_data[-1]["rating"]
-    max_elo = max(r["rating"] for r in team_data)
-    min_elo = min(r["rating"] for r in team_data)
-    peak_entry = next(r for r in team_data if r["rating"] == max_elo)
-    peak_label = f"MW{peak_entry['matchweek']}" if view_mode == "Single Season" else f"{peak_entry['season'][:4]} MW{peak_entry['matchweek']}"
+# Build the full table data
+full_table = []
+for pos, entry in enumerate(table_data, 1):
+    team_name = entry["short_name"]
 
-    summary_data.append({
-        "Team": team_name,
-        "Start": f"{start_elo:.0f}",
-        "Current": f"{end_elo:.0f}",
-        "Change": f"{end_elo - start_elo:+.0f}",
-        "Peak": f"{max_elo:.0f} ({peak_label})",
-        "Low": f"{min_elo:.0f}",
-        "Range": f"{max_elo - min_elo:.0f}",
+    # Get season data for this team to calculate stats
+    team_season_data = sorted(
+        [r for r in season_data if r["short_name"] == team_name],
+        key=lambda r: (r["season"], r["matchweek"])
+    )
+
+    if team_season_data:
+        start_elo = team_season_data[0]["rating"]
+        current_elo = entry["rating"]
+        max_elo = max(r["rating"] for r in team_season_data)
+        min_elo = min(r["rating"] for r in team_season_data)
+        peak_entry = next(r for r in team_season_data if r["rating"] == max_elo)
+        peak_mw = peak_entry["matchweek"]
+
+        # Get change from previous matchweek
+        change = entry.get("rating_change", 0)
+    else:
+        start_elo = current_elo = max_elo = min_elo = 1500
+        peak_mw = 0
+        change = 0
+
+    full_table.append({
+        "pos": pos,
+        "team": team_name,
+        "current_elo": current_elo,
+        "change": change,
+        "start_elo": start_elo,
+        "season_change": current_elo - start_elo,
+        "peak": max_elo,
+        "peak_mw": peak_mw,
+        "low": min_elo,
+        "range": max_elo - min_elo,
+        "selected": team_name in selected_teams,
     })
 
-summary_data.sort(key=lambda x: float(x["Current"]), reverse=True)
-st.dataframe(summary_data, use_container_width=True, hide_index=True)
+# Display table with checkboxes using columns
+header_cols = st.columns([0.5, 0.8, 2, 1.2, 1, 1.2, 1.2, 1, 1])
+header_cols[0].markdown("**#**")
+header_cols[1].markdown("**Show**")
+header_cols[2].markdown("**Team**")
+header_cols[3].markdown("**ELO**")
+header_cols[4].markdown("**Chg**")
+header_cols[5].markdown("**Season +/-**")
+header_cols[6].markdown("**Peak**")
+header_cols[7].markdown("**Low**")
+header_cols[8].markdown("**Range**")
+
+# Track changes to selection
+new_selected = set()
+
+for row in full_table:
+    cols = st.columns([0.5, 0.8, 2, 1.2, 1, 1.2, 1.2, 1, 1])
+
+    cols[0].write(f"{row['pos']}")
+
+    # Checkbox for selection
+    is_checked = cols[1].checkbox(
+        "Show",
+        value=row["selected"],
+        key=f"check_{row['team']}",
+        label_visibility="collapsed"
+    )
+    if is_checked:
+        new_selected.add(row["team"])
+
+    # Team name with color indicator
+    color = get_team_color(row["team"])
+    cols[2].markdown(f"<span style='color:{color}'>●</span> {row['team']}", unsafe_allow_html=True)
+
+    # Current ELO
+    cols[3].write(f"{row['current_elo']:.0f}")
+
+    # Change indicator
+    chg = row["change"]
+    if chg > 0:
+        cols[4].markdown(f"<span style='color:green'>▲ {chg:.0f}</span>", unsafe_allow_html=True)
+    elif chg < 0:
+        cols[4].markdown(f"<span style='color:red'>▼ {abs(chg):.0f}</span>", unsafe_allow_html=True)
+    else:
+        cols[4].write("—")
+
+    # Season change
+    season_chg = row["season_change"]
+    if season_chg > 0:
+        cols[5].markdown(f"<span style='color:green'>+{season_chg:.0f}</span>", unsafe_allow_html=True)
+    elif season_chg < 0:
+        cols[5].markdown(f"<span style='color:red'>{season_chg:.0f}</span>", unsafe_allow_html=True)
+    else:
+        cols[5].write("0")
+
+    # Peak
+    cols[6].write(f"{row['peak']:.0f} (MW{row['peak_mw']})")
+
+    # Low
+    cols[7].write(f"{row['low']:.0f}")
+
+    # Range
+    cols[8].write(f"{row['range']:.0f}")
+
+# Update session state if selection changed
+if new_selected != st.session_state.selected_teams:
+    st.session_state.selected_teams = new_selected
+    st.rerun()
 
 # Info box
 with st.expander("About ELO Ratings"):

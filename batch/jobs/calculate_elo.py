@@ -112,33 +112,70 @@ def calculate_elo_ratings(
             else:
                 print("Could not determine previous season, starting from 1500")
 
-        # Track ratings per matchweek for each team
-        matchweek_ratings: dict[int, dict[int, float]] = {}  # matchweek -> {team_id -> rating}
-
+        # Get all teams in this season (both home and away)
+        season_team_ids = set()
         for match in matches:
-            if match.home_score is None or match.away_score is None:
-                continue
+            season_team_ids.add(match.home_team_id)
+            season_team_ids.add(match.away_team_id)
 
-            # Update ratings
-            elo.update_ratings(
-                match.home_team_id,
-                match.away_team_id,
-                match.home_score,
-                match.away_score,
-            )
+        # Initialize ratings for teams that don't have previous season data
+        for team_id in season_team_ids:
+            if team_id not in elo.ratings:
+                elo.set_rating(team_id, 1500)
 
-            # Store ratings after this matchweek
-            if match.matchweek not in matchweek_ratings:
-                matchweek_ratings[match.matchweek] = {}
+        # Group matches by matchweek
+        matches_by_mw: dict[int, list] = {}
+        for match in matches:
+            if match.matchweek not in matches_by_mw:
+                matches_by_mw[match.matchweek] = []
+            matches_by_mw[match.matchweek].append(match)
 
-            # Copy current ratings for both teams
-            matchweek_ratings[match.matchweek][match.home_team_id] = elo.get_rating(match.home_team_id)
-            matchweek_ratings[match.matchweek][match.away_team_id] = elo.get_rating(match.away_team_id)
+        # Track ratings per matchweek for ALL teams
+        matchweek_ratings: dict[int, dict[int, float]] = {}  # matchweek -> {team_id -> rating}
+        previous_ratings: dict[int, float] = {}  # Track previous matchweek ratings for change calculation
+
+        for matchweek in sorted(matches_by_mw.keys()):
+            mw_matches = matches_by_mw[matchweek]
+
+            # Process all matches in this matchweek
+            for match in mw_matches:
+                if match.home_score is None or match.away_score is None:
+                    continue
+
+                # Update ratings
+                elo.update_ratings(
+                    match.home_team_id,
+                    match.away_team_id,
+                    match.home_score,
+                    match.away_score,
+                )
+
+            # Store ratings for ALL teams after this matchweek
+            matchweek_ratings[matchweek] = {}
+            for team_id in season_team_ids:
+                matchweek_ratings[matchweek][team_id] = elo.get_rating(team_id)
 
         # Save to database - one rating per team per matchweek
         ratings_saved = 0
-        for matchweek, team_ratings in matchweek_ratings.items():
+        sorted_matchweeks = sorted(matchweek_ratings.keys())
+
+        for matchweek in sorted_matchweeks:
+            team_ratings = matchweek_ratings[matchweek]
+
+            # Get previous matchweek's ratings for calculating change
+            prev_mw_idx = sorted_matchweeks.index(matchweek) - 1
+            if prev_mw_idx >= 0:
+                prev_mw = sorted_matchweeks[prev_mw_idx]
+                prev_ratings = matchweek_ratings.get(prev_mw, {})
+            else:
+                # First matchweek - use initial ratings
+                prev_ratings = initial_ratings
+
             for team_id, rating in team_ratings.items():
+                # Calculate change from previous matchweek
+                prev_rating = prev_ratings.get(team_id, 1500)
+                rating_change = rating - prev_rating
+
                 existing = session.execute(
                     select(EloRating)
                     .where(EloRating.team_id == team_id)
@@ -148,12 +185,14 @@ def calculate_elo_ratings(
 
                 if existing:
                     existing.rating = Decimal(str(round(rating, 2)))
+                    existing.rating_change = Decimal(str(round(rating_change, 2)))
                 else:
                     new_rating = EloRating(
                         team_id=team_id,
                         season=season,
                         matchweek=matchweek,
                         rating=Decimal(str(round(rating, 2))),
+                        rating_change=Decimal(str(round(rating_change, 2))),
                     )
                     session.add(new_rating)
                     ratings_saved += 1
