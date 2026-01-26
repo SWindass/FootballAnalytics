@@ -138,7 +138,7 @@ def load_season_summary(season: str):
 
 @st.cache_data(ttl=300)
 def load_season_value_bets(season: str):
-    """Load value bet performance for a season."""
+    """Load value bet performance for a season (deduplicated - best odds per outcome)."""
     with SyncSessionLocal() as session:
         stmt = (
             select(ValueBet.outcome, ValueBet.odds, ValueBet.edge, ValueBet.bookmaker,
@@ -151,27 +151,31 @@ def load_season_value_bets(season: str):
         )
         rows = list(session.execute(stmt).all())
 
-        performance = []
+        # Group by match_id + outcome, keep best odds
+        best_bets = {}
         for outcome, odds, edge, bookmaker, mw, home_id, away_id, home_score, away_score, match_id in rows:
-            actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
-            won = outcome == actual
-            stake = 10.0
-            profit = stake * (float(odds) - 1) if won else -stake
+            key = (match_id, outcome)
+            if key not in best_bets or float(odds) > best_bets[key]["odds"]:
+                actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
+                won = outcome == actual
+                stake = 10.0
+                profit = stake * (float(odds) - 1) if won else -stake
 
-            performance.append({
-                "matchweek": mw,
-                "match_id": match_id,
-                "home_team_id": home_id,
-                "away_team_id": away_id,
-                "outcome": outcome,
-                "odds": float(odds),
-                "edge": float(edge),
-                "won": won,
-                "profit": profit,
-                "bookmaker": bookmaker,
-            })
+                best_bets[key] = {
+                    "matchweek": mw,
+                    "match_id": match_id,
+                    "home_team_id": home_id,
+                    "away_team_id": away_id,
+                    "outcome": outcome,
+                    "odds": float(odds),
+                    "edge": float(edge),
+                    "won": won,
+                    "profit": profit,
+                    "bookmaker": bookmaker,
+                }
 
-        return performance
+        # Sort by matchweek
+        return sorted(best_bets.values(), key=lambda x: (x["matchweek"], x["match_id"]))
 
 
 # Load data
@@ -187,26 +191,45 @@ st.title("📊 Historical Results")
 # Default to current season from settings
 default_season = settings.current_season if settings.current_season in seasons else seasons[-1]
 
-# Season and Matchweek navigation
+# Initialize session state
+if "hist_season" not in st.session_state:
+    st.session_state.hist_season = default_season
+if "hist_mw" not in st.session_state:
+    st.session_state.hist_mw = None  # Will be set after we know matchweeks
+
+# Ensure season is valid
+if st.session_state.hist_season not in seasons:
+    st.session_state.hist_season = default_season
+
+# Season navigation
 col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 1, 1, 2, 1])
 
 with col1:
-    prev_season = st.button("◀", key="prev_s", help="Previous season")
-with col2:
-    season_idx = seasons.index(default_season) if "season" not in st.session_state else seasons.index(st.session_state.season) if st.session_state.season in seasons else len(seasons) - 1
-
-    # Handle prev/next
-    if prev_season and season_idx > 0:
-        season_idx -= 1
-    if "next_s_clicked" in st.session_state and st.session_state.next_s_clicked and season_idx < len(seasons) - 1:
-        season_idx += 1
-        st.session_state.next_s_clicked = False
-
-    selected_season = st.selectbox("Season", seasons, index=season_idx, key="season", label_visibility="collapsed")
-with col3:
-    if st.button("▶", key="next_s", help="Next season"):
-        st.session_state.next_s_clicked = True
+    season_idx = seasons.index(st.session_state.hist_season)
+    if st.button("◀", key="prev_s", help="Previous season", disabled=season_idx == 0):
+        st.session_state.hist_season = seasons[season_idx - 1]
+        st.session_state.hist_mw = None  # Reset matchweek when season changes
         st.rerun()
+
+with col2:
+    new_season = st.selectbox(
+        "Season", seasons,
+        index=seasons.index(st.session_state.hist_season),
+        label_visibility="collapsed"
+    )
+    if new_season != st.session_state.hist_season:
+        st.session_state.hist_season = new_season
+        st.session_state.hist_mw = None
+        st.rerun()
+
+with col3:
+    season_idx = seasons.index(st.session_state.hist_season)
+    if st.button("▶", key="next_s", help="Next season", disabled=season_idx == len(seasons) - 1):
+        st.session_state.hist_season = seasons[season_idx + 1]
+        st.session_state.hist_mw = None
+        st.rerun()
+
+selected_season = st.session_state.hist_season
 
 # Get matchweeks for selected season
 matchweeks = get_matchweeks_for_season(selected_season)
@@ -214,33 +237,61 @@ if not matchweeks:
     st.warning("No matchweeks found")
     st.stop()
 
-# Default to last matchweek
-default_mw_idx = len(matchweeks) - 1
+# Initialize/validate matchweek
+if st.session_state.hist_mw is None or st.session_state.hist_mw not in matchweeks:
+    st.session_state.hist_mw = matchweeks[-1]  # Default to last matchweek
 
 with col4:
-    prev_mw = st.button("◀", key="prev_m", help="Previous matchweek")
-with col5:
-    mw_idx = default_mw_idx if "mw" not in st.session_state else (matchweeks.index(st.session_state.mw) if st.session_state.mw in matchweeks else default_mw_idx)
-
-    if prev_mw and mw_idx > 0:
-        mw_idx -= 1
-    if "next_m_clicked" in st.session_state and st.session_state.next_m_clicked and mw_idx < len(matchweeks) - 1:
-        mw_idx += 1
-        st.session_state.next_m_clicked = False
-
-    selected_mw = st.selectbox("Matchweek", matchweeks, index=mw_idx, format_func=lambda x: f"MW {x}", key="mw", label_visibility="collapsed")
-with col6:
-    if st.button("▶", key="next_m", help="Next matchweek"):
-        st.session_state.next_m_clicked = True
+    mw_idx = matchweeks.index(st.session_state.hist_mw)
+    if st.button("◀", key="prev_m", help="Previous matchweek", disabled=mw_idx == 0):
+        st.session_state.hist_mw = matchweeks[mw_idx - 1]
         st.rerun()
+
+with col5:
+    new_mw = st.selectbox(
+        "Matchweek", matchweeks,
+        index=matchweeks.index(st.session_state.hist_mw),
+        format_func=lambda x: f"MW {x}",
+        label_visibility="collapsed"
+    )
+    if new_mw != st.session_state.hist_mw:
+        st.session_state.hist_mw = new_mw
+        st.rerun()
+
+with col6:
+    mw_idx = matchweeks.index(st.session_state.hist_mw)
+    if st.button("▶", key="next_m", help="Next matchweek", disabled=mw_idx == len(matchweeks) - 1):
+        st.session_state.hist_mw = matchweeks[mw_idx + 1]
+        st.rerun()
+
+selected_mw = st.session_state.hist_mw
 
 st.markdown("---")
 
+# Helper functions for formatting
+def format_outcome(outcome: str) -> str:
+    """Format outcome for display."""
+    return {"home_win": "Home", "draw": "Draw", "away_win": "Away"}.get(outcome, outcome)
+
+def get_best_value_bet(value_bets: list, outcome: str) -> dict | None:
+    """Get best value bet for an outcome (highest odds)."""
+    bets = [vb for vb in value_bets if vb["outcome"] == outcome]
+    return max(bets, key=lambda x: x["odds"]) if bets else None
+
+def dedupe_value_bets(value_bets: list) -> list:
+    """Keep only best odds per outcome."""
+    best = {}
+    for vb in value_bets:
+        outcome = vb["outcome"]
+        if outcome not in best or vb["odds"] > best[outcome]["odds"]:
+            best[outcome] = vb
+    return list(best.values())
+
 # Content tabs
-tab1, tab2, tab3 = st.tabs(["📋 Results", "📈 Season Overview", "💰 Value Bets"])
+tab1, tab2, tab3 = st.tabs(["Results", "Season Overview", "Value Bets"])
 
 with tab1:
-    st.subheader(f"Matchweek {selected_mw} - {selected_season}")
+    st.subheader(f"Matchweek {selected_mw}")
 
     with st.spinner("Loading results..."):
         results = load_matchweek_results(selected_season, selected_mw)
@@ -248,78 +299,101 @@ with tab1:
     if not results:
         st.info("No matches found")
     else:
-        finished = [r for r in results if r["is_finished"]]
-        pending = [r for r in results if not r["is_finished"]]
+        # Build results table
+        table_data = []
+        for r in results:
+            home = teams.get(r["home_team_id"], {}).get("short_name", "?")
+            away = teams.get(r["away_team_id"], {}).get("short_name", "?")
 
-        # Prediction accuracy
-        correct = sum(1 for r in finished if r["analysis"] and (
-            ("home" if r["analysis"]["home_prob"] > r["analysis"]["draw_prob"] and r["analysis"]["home_prob"] > r["analysis"]["away_prob"] else ("away" if r["analysis"]["away_prob"] > r["analysis"]["draw_prob"] else "draw"))
-            == ("home" if r["home_score"] > r["away_score"] else ("away" if r["away_score"] > r["home_score"] else "draw"))
+            # Score or kickoff time
+            if r["is_finished"]:
+                score = f"{r['home_score']} - {r['away_score']}"
+            else:
+                score = r["kickoff"].strftime("%a %H:%M")
+
+            # Prediction
+            prediction = ""
+            correct = None
+            if r["analysis"]:
+                a = r["analysis"]
+                probs = {"H": a["home_prob"], "D": a["draw_prob"], "A": a["away_prob"]}
+                pred_key = max(probs, key=probs.get)
+                prediction = f"{pred_key} {probs[pred_key]:.0%}"
+
+                if r["is_finished"]:
+                    actual = "H" if r["home_score"] > r["away_score"] else ("A" if r["away_score"] > r["home_score"] else "D")
+                    correct = pred_key == actual
+
+            # Best value bet (deduplicated)
+            value_bet = ""
+            vb_won = None
+            if r["value_bets"]:
+                best_vbs = dedupe_value_bets(r["value_bets"])
+                if best_vbs:
+                    vb = best_vbs[0]  # Show first one
+                    value_bet = f"{format_outcome(vb['outcome'])} @ {vb['odds']:.2f} (+{vb['edge']:.0%})"
+                    if r["is_finished"]:
+                        actual = "home_win" if r["home_score"] > r["away_score"] else ("draw" if r["home_score"] == r["away_score"] else "away_win")
+                        vb_won = vb["outcome"] == actual
+
+            row = {
+                "Home": home,
+                "Score": score,
+                "Away": away,
+                "Prediction": prediction,
+            }
+
+            # Add result indicator
+            if correct is not None:
+                row[""] = "✓" if correct else "✗"
+            elif not r["is_finished"]:
+                row[""] = ""
+            else:
+                row[""] = "-"
+
+            # Add value bet if any
+            if value_bet:
+                row["Value Bet"] = value_bet
+                if vb_won is not None:
+                    row["Won"] = "✓" if vb_won else "✗"
+
+            table_data.append(row)
+
+        # Summary metrics
+        finished = [r for r in results if r["is_finished"]]
+        with_analysis = [r for r in finished if r["analysis"]]
+        correct_count = sum(1 for r in with_analysis if (
+            ("H" if r["analysis"]["home_prob"] > r["analysis"]["draw_prob"] and r["analysis"]["home_prob"] > r["analysis"]["away_prob"] else ("A" if r["analysis"]["away_prob"] > r["analysis"]["draw_prob"] else "D"))
+            == ("H" if r["home_score"] > r["away_score"] else ("A" if r["away_score"] > r["home_score"] else "D"))
         ))
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         col1.metric("Matches", len(results))
         col2.metric("Completed", len(finished))
-        col3.metric("Pending", len(pending))
-        if finished:
-            col4.metric("Accuracy", f"{correct}/{len(finished)}")
+        if with_analysis:
+            col3.metric("Predictions", f"{correct_count}/{len(with_analysis)} correct")
 
-        st.markdown("---")
+        # Display table
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-        for result in results:
-            home_name = teams.get(result["home_team_id"], {}).get("short_name", "?")
-            away_name = teams.get(result["away_team_id"], {}).get("short_name", "?")
-
-            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
-
-            with col1:
-                if result["is_finished"]:
-                    st.markdown(f"**{home_name}** {result['home_score']} - {result['away_score']} **{away_name}**")
-                else:
-                    st.markdown(f"**{home_name}** vs **{away_name}** ({result['kickoff'].strftime('%a %H:%M')})")
-
-            with col2:
-                if result["analysis"]:
-                    a = result["analysis"]
-                    st.caption(f"H {a['home_prob']:.0%} D {a['draw_prob']:.0%} A {a['away_prob']:.0%}")
-
-            with col3:
-                for vb in result["value_bets"][:2]:
-                    st.caption(f"{vb['outcome'][0].upper()} +{vb['edge']:.0%} @ {vb['odds']:.2f}")
-
-            with col4:
-                if result["is_finished"] and result["analysis"]:
-                    a = result["analysis"]
-                    predicted = "home" if a["home_prob"] > a["draw_prob"] and a["home_prob"] > a["away_prob"] else ("away" if a["away_prob"] > a["draw_prob"] else "draw")
-                    actual = "home" if result["home_score"] > result["away_score"] else ("away" if result["away_score"] > result["home_score"] else "draw")
-                    st.markdown("✅" if predicted == actual else "❌")
-
-        # Value bet results
+        # Value bet summary for this matchweek
         vb_results = []
         for r in finished:
             if r["value_bets"]:
                 actual = "home_win" if r["home_score"] > r["away_score"] else ("draw" if r["home_score"] == r["away_score"] else "away_win")
                 home = teams.get(r["home_team_id"], {}).get("short_name", "?")
                 away = teams.get(r["away_team_id"], {}).get("short_name", "?")
-                for vb in r["value_bets"]:
+
+                for vb in dedupe_value_bets(r["value_bets"]):
                     won = vb["outcome"] == actual
                     profit = 10 * (vb["odds"] - 1) if won else -10
-                    vb_results.append({
-                        "Match": f"{home} v {away}",
-                        "Bet": vb["outcome"].replace("_", " ").title(),
-                        "Odds": f"{vb['odds']:.2f}",
-                        "Edge": f"+{vb['edge']:.0%}",
-                        "Result": "✅" if won else "❌",
-                        "P/L": f"£{profit:+.0f}",
-                    })
+                    vb_results.append({"won": won, "profit": profit})
 
         if vb_results:
-            st.markdown("---")
-            st.subheader("💰 Value Bets")
-            st.dataframe(vb_results, use_container_width=True, hide_index=True)
-            total = sum(float(v["P/L"].replace("£", "").replace("+", "")) for v in vb_results)
-            wins = sum(1 for v in vb_results if v["Result"] == "✅")
-            st.markdown(f"**{wins}/{len(vb_results)} won, £{total:+.0f}**")
+            wins = sum(1 for v in vb_results if v["won"])
+            total_profit = sum(v["profit"] for v in vb_results)
+            st.caption(f"Value bets: {wins}/{len(vb_results)} won, £{total_profit:+.0f}")
 
 with tab2:
     st.subheader(f"Season Overview - {selected_season}")
@@ -378,23 +452,39 @@ with tab3:
         if cumulative:
             st.line_chart(pd.DataFrame(cumulative).set_index("MW"))
 
-        # By outcome
+        # By outcome summary
         by_outcome = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
         for p in performance:
             by_outcome[p["outcome"]]["bets"] += 1
             by_outcome[p["outcome"]]["wins"] += int(p["won"])
             by_outcome[p["outcome"]]["profit"] += p["profit"]
 
-        outcome_data = []
-        for o in ["home_win", "draw", "away_win"]:
-            if o in by_outcome:
-                d = by_outcome[o]
-                outcome_data.append({
-                    "Outcome": o.replace("_", " ").title(),
-                    "Bets": d["bets"],
-                    "Wins": d["wins"],
-                    "ROI": f"{d['profit']/(d['bets']*10)*100:+.0f}%" if d["bets"] else "N/A",
-                })
+        st.subheader("By Outcome")
+        outcome_cols = st.columns(3)
+        for i, (outcome, label) in enumerate([("home_win", "Home"), ("draw", "Draw"), ("away_win", "Away")]):
+            if outcome in by_outcome:
+                d = by_outcome[outcome]
+                win_rate = d["wins"] / d["bets"] * 100 if d["bets"] else 0
+                outcome_roi = d["profit"] / (d["bets"] * 10) * 100 if d["bets"] else 0
+                with outcome_cols[i]:
+                    st.metric(label, f"{d['bets']} bets")
+                    st.caption(f"{d['wins']} wins ({win_rate:.0f}%), ROI: {outcome_roi:+.0f}%")
 
-        if outcome_data:
-            st.dataframe(outcome_data, use_container_width=True, hide_index=True)
+        # Recent bets table
+        st.subheader("Bet History")
+        bet_table = []
+        for p in performance[-50:]:  # Last 50 bets
+            home = teams.get(p["home_team_id"], {}).get("short_name", "?")
+            away = teams.get(p["away_team_id"], {}).get("short_name", "?")
+            bet_table.append({
+                "MW": p["matchweek"],
+                "Match": f"{home} v {away}",
+                "Bet": format_outcome(p["outcome"]),
+                "Odds": f"{p['odds']:.2f}",
+                "Edge": f"+{p['edge']:.0%}",
+                "Result": "✓" if p["won"] else "✗",
+                "P/L": f"£{p['profit']:+.0f}",
+            })
+
+        if bet_table:
+            st.dataframe(pd.DataFrame(bet_table), use_container_width=True, hide_index=True)

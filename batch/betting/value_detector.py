@@ -474,10 +474,18 @@ class ValueDetector:
                 )
                 value_bets.append(value_bet)
 
-        # Sort by confidence * edge (prioritize high confidence + high edge)
-        value_bets.sort(key=lambda x: x.confidence * x.edge, reverse=True)
+        # Deduplicate: keep only best odds per outcome
+        best_by_outcome = {}
+        for vb in value_bets:
+            if vb.outcome not in best_by_outcome or vb.odds > best_by_outcome[vb.outcome].odds:
+                best_by_outcome[vb.outcome] = vb
 
-        return value_bets
+        deduped = list(best_by_outcome.values())
+
+        # Sort by confidence * edge (prioritize high confidence + high edge)
+        deduped.sort(key=lambda x: x.confidence * x.edge, reverse=True)
+
+        return deduped
 
     def _get_model_probabilities(self, analysis: MatchAnalysis) -> Optional[dict]:
         """Extract model probabilities from analysis."""
