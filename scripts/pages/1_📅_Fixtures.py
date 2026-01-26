@@ -702,7 +702,16 @@ for date_str, day_fixtures in fixtures_by_date.items():
         # Show prominent value bet callout for upcoming matches
         if not is_finished and value_bets_deduped:
             best = value_bets_deduped[0]
-            outcome_full = {"home_win": f"Back {home_name}", "draw": "Back the Draw", "away_win": f"Back {away_name}"}.get(best.outcome, "?")
+            outcome_map = {
+                "home_win": f"Back {home_name}",
+                "draw": "Back the Draw",
+                "away_win": f"Back {away_name}",
+                "over_2_5": "Over 2.5 Goals",
+                "under_2_5": "Under 2.5 Goals",
+                "btts_yes": "Both Teams to Score",
+                "btts_no": "Both Teams NOT to Score",
+            }
+            outcome_full = outcome_map.get(best.outcome, best.outcome.replace("_", " ").title())
             odds_dec = float(best.odds)
             odds_frac = decimal_to_fraction(odds_dec)
             edge_pct = float(best.edge)
