@@ -107,31 +107,34 @@ def load_matchweek_results(season: str, matchweek: int):
 
 @st.cache_data(ttl=300)
 def load_season_summary(season: str):
-    """Load summary stats for a season."""
+    """Load value bet summary stats by matchweek for a season."""
     with SyncSessionLocal() as session:
         stmt = (
-            select(Match.matchweek,
-                   MatchAnalysis.consensus_home_prob,
-                   MatchAnalysis.consensus_draw_prob,
-                   MatchAnalysis.consensus_away_prob,
-                   Match.home_score, Match.away_score)
-            .join(MatchAnalysis, Match.id == MatchAnalysis.match_id)
+            select(ValueBet.outcome, ValueBet.odds, ValueBet.edge,
+                   Match.matchweek, Match.home_score, Match.away_score, Match.id)
+            .join(Match, ValueBet.match_id == Match.id)
             .where(Match.season == season)
             .where(Match.status == MatchStatus.FINISHED)
-            .where(MatchAnalysis.consensus_home_prob.isnot(None))
             .order_by(Match.matchweek)
         )
         rows = list(session.execute(stmt).all())
 
-        mw_stats = defaultdict(lambda: {"correct": 0, "total": 0})
-        for mw, home_prob, draw_prob, away_prob, home_score, away_score in rows:
-            h, d, a = float(home_prob), float(draw_prob), float(away_prob)
-            predicted = "home" if h > d and h > a else ("away" if a > d else "draw")
-            actual = "home" if home_score > away_score else ("away" if away_score > home_score else "draw")
+        # Dedupe: best odds per match/outcome
+        best_bets = {}
+        for outcome, odds, edge, mw, home_score, away_score, match_id in rows:
+            key = (match_id, outcome)
+            if key not in best_bets or float(odds) > best_bets[key]["odds"]:
+                actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
+                won = outcome == actual
+                profit = 10 * (float(odds) - 1) if won else -10
+                best_bets[key] = {"mw": mw, "won": won, "profit": profit, "odds": float(odds)}
 
-            mw_stats[mw]["total"] += 1
-            if predicted == actual:
-                mw_stats[mw]["correct"] += 1
+        # Aggregate by matchweek
+        mw_stats = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
+        for bet in best_bets.values():
+            mw_stats[bet["mw"]]["bets"] += 1
+            mw_stats[bet["mw"]]["wins"] += int(bet["won"])
+            mw_stats[bet["mw"]]["profit"] += bet["profit"]
 
         return dict(mw_stats)
 
@@ -301,6 +304,9 @@ with tab1:
     else:
         # Build results table
         table_data = []
+        vb_wins = 0
+        vb_total = 0
+
         for r in results:
             home = teams.get(r["home_team_id"], {}).get("short_name", "?")
             away = teams.get(r["away_team_id"], {}).get("short_name", "?")
@@ -311,67 +317,36 @@ with tab1:
             else:
                 score = r["kickoff"].strftime("%a %H:%M")
 
-            # Prediction
-            prediction = ""
-            correct = None
-            if r["analysis"]:
-                a = r["analysis"]
-                probs = {"H": a["home_prob"], "D": a["draw_prob"], "A": a["away_prob"]}
-                pred_key = max(probs, key=probs.get)
-                prediction = f"{pred_key} {probs[pred_key]:.0%}"
-
-                if r["is_finished"]:
-                    actual = "H" if r["home_score"] > r["away_score"] else ("A" if r["away_score"] > r["home_score"] else "D")
-                    correct = pred_key == actual
-
-            # Best value bet (deduplicated)
-            value_bet = ""
-            vb_won = None
-            if r["value_bets"]:
-                best_vbs = dedupe_value_bets(r["value_bets"])
-                if best_vbs:
-                    vb = best_vbs[0]  # Show first one
-                    value_bet = f"{format_outcome(vb['outcome'])} @ {vb['odds']:.2f} (+{vb['edge']:.0%})"
-                    if r["is_finished"]:
-                        actual = "home_win" if r["home_score"] > r["away_score"] else ("draw" if r["home_score"] == r["away_score"] else "away_win")
-                        vb_won = vb["outcome"] == actual
-
             row = {
                 "Home": home,
                 "Score": score,
                 "Away": away,
-                "Prediction": prediction,
             }
 
-            # Add result indicator
-            if correct is not None:
-                row[""] = "✓" if correct else "✗"
-            elif not r["is_finished"]:
-                row[""] = ""
-            else:
-                row[""] = "-"
-
-            # Add value bet if any
-            if value_bet:
-                row["Value Bet"] = value_bet
-                if vb_won is not None:
-                    row["Won"] = "✓" if vb_won else "✗"
+            # Value bet (only thing we track accuracy on)
+            if r["value_bets"]:
+                best_vbs = dedupe_value_bets(r["value_bets"])
+                if best_vbs:
+                    vb = best_vbs[0]
+                    row["Value Bet"] = f"{format_outcome(vb['outcome'])} @ {vb['odds']:.2f} (+{vb['edge']:.0%})"
+                    if r["is_finished"]:
+                        actual = "home_win" if r["home_score"] > r["away_score"] else ("draw" if r["home_score"] == r["away_score"] else "away_win")
+                        won = vb["outcome"] == actual
+                        row[""] = "✓" if won else "✗"
+                        vb_total += 1
+                        if won:
+                            vb_wins += 1
 
             table_data.append(row)
 
-        # Summary metrics
+        # Summary metrics - focus on value bets only
         finished = [r for r in results if r["is_finished"]]
-        with_analysis = [r for r in finished if r["analysis"]]
-        correct_count = sum(1 for r in with_analysis if (
-            ("H" if r["analysis"]["home_prob"] > r["analysis"]["draw_prob"] and r["analysis"]["home_prob"] > r["analysis"]["away_prob"] else ("A" if r["analysis"]["away_prob"] > r["analysis"]["draw_prob"] else "D"))
-            == ("H" if r["home_score"] > r["away_score"] else ("A" if r["away_score"] > r["home_score"] else "D"))
-        ))
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Matches", len(results))
         col2.metric("Completed", len(finished))
-        if with_analysis:
-            col3.metric("Predictions", f"{correct_count}/{len(with_analysis)} correct")
+        if vb_total > 0:
+            col3.metric("Value Bets", f"{vb_wins}/{vb_total} won")
 
         # Display table
         df = pd.DataFrame(table_data)
@@ -396,24 +371,28 @@ with tab1:
             st.caption(f"Value bets: {wins}/{len(vb_results)} won, £{total_profit:+.0f}")
 
 with tab2:
-    st.subheader(f"Season Overview - {selected_season}")
+    st.subheader(f"Value Bet Performance by Matchweek")
 
     with st.spinner("Loading season data..."):
         mw_stats = load_season_summary(selected_season)
 
     if not mw_stats:
-        st.info("No data found")
+        st.info("No value bets found")
     else:
-        total_correct = sum(s["correct"] for s in mw_stats.values())
-        total_matches = sum(s["total"] for s in mw_stats.values())
+        total_bets = sum(s["bets"] for s in mw_stats.values())
+        total_wins = sum(s["wins"] for s in mw_stats.values())
+        total_profit = sum(s["profit"] for s in mw_stats.values())
+        roi = total_profit / (total_bets * 10) * 100 if total_bets else 0
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Matches", total_matches)
-        col2.metric("Correct", total_correct)
-        col3.metric("Accuracy", f"{100*total_correct/total_matches:.1f}%" if total_matches else "N/A")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Bets", total_bets)
+        col2.metric("Win Rate", f"{100*total_wins/total_bets:.0f}%" if total_bets else "N/A")
+        col3.metric("ROI", f"{roi:+.1f}%")
+        col4.metric("Profit", f"£{total_profit:+.0f}")
 
+        # Profit by matchweek chart
         chart_data = pd.DataFrame([
-            {"MW": mw, "Accuracy": s["correct"]/s["total"]*100 if s["total"] else 0}
+            {"MW": mw, "Profit": s["profit"]}
             for mw, s in sorted(mw_stats.items())
         ])
         st.bar_chart(chart_data.set_index("MW"))
