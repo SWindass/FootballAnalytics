@@ -136,34 +136,74 @@ def load_matchweek_results(season: str, matchweek: int):
 
 @st.cache_data(ttl=300)
 def load_season_summary(season: str):
-    """Load value bet summary stats by matchweek for a season."""
+    """Load value bet summary stats by matchweek for a season.
+
+    For current season: uses ValueBet table.
+    For historical seasons: calculates on-the-fly from MatchAnalysis.features.
+    """
     with SyncSessionLocal() as session:
+        mw_stats = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
+
+        # First try ValueBet table (for current season)
         stmt = (
-            select(ValueBet.outcome, ValueBet.odds, ValueBet.edge,
+            select(ValueBet.outcome, ValueBet.odds,
                    Match.matchweek, Match.home_score, Match.away_score, Match.id)
             .join(Match, ValueBet.match_id == Match.id)
             .where(Match.season == season)
             .where(Match.status == MatchStatus.FINISHED)
             .order_by(Match.matchweek)
         )
+        vb_rows = list(session.execute(stmt).all())
+
+        if vb_rows:
+            # Dedupe: best odds per match/outcome
+            best_bets = {}
+            for outcome, odds, mw, home_score, away_score, match_id in vb_rows:
+                key = (match_id, outcome)
+                if key not in best_bets or float(odds) > best_bets[key]["odds"]:
+                    actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
+                    won = outcome == actual
+                    profit = 10 * (float(odds) - 1) if won else -10
+                    best_bets[key] = {"mw": mw, "won": won, "profit": profit, "odds": float(odds)}
+
+            for bet in best_bets.values():
+                mw_stats[bet["mw"]]["bets"] += 1
+                mw_stats[bet["mw"]]["wins"] += int(bet["won"])
+                mw_stats[bet["mw"]]["profit"] += bet["profit"]
+
+            return dict(mw_stats)
+
+        # Fall back to calculating from MatchAnalysis (for historical seasons)
+        stmt = (
+            select(Match.id, Match.matchweek, Match.home_score, Match.away_score,
+                   MatchAnalysis.consensus_away_prob, MatchAnalysis.features)
+            .join(MatchAnalysis, Match.id == MatchAnalysis.match_id)
+            .where(Match.season == season)
+            .where(Match.status == MatchStatus.FINISHED)
+            .where(MatchAnalysis.consensus_home_prob.isnot(None))
+            .order_by(Match.matchweek)
+        )
         rows = list(session.execute(stmt).all())
 
-        # Dedupe: best odds per match/outcome
-        best_bets = {}
-        for outcome, odds, edge, mw, home_score, away_score, match_id in rows:
-            key = (match_id, outcome)
-            if key not in best_bets or float(odds) > best_bets[key]["odds"]:
-                actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
-                won = outcome == actual
-                profit = 10 * (float(odds) - 1) if won else -10
-                best_bets[key] = {"mw": mw, "won": won, "profit": profit, "odds": float(odds)}
+        for match_id, mw, home_score, away_score, away_prob, features in rows:
+            hist_odds = features.get("historical_odds", {}) if features else {}
+            away_odds = hist_odds.get("avg_away_odds") or hist_odds.get("b365_away_odds")
 
-        # Aggregate by matchweek
-        mw_stats = defaultdict(lambda: {"bets": 0, "wins": 0, "profit": 0})
-        for bet in best_bets.values():
-            mw_stats[bet["mw"]]["bets"] += 1
-            mw_stats[bet["mw"]]["wins"] += int(bet["won"])
-            mw_stats[bet["mw"]]["profit"] += bet["profit"]
+            if not away_odds:
+                continue
+
+            actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
+
+            # Away win strategy: 5-12% edge
+            market_prob = 1.0 / float(away_odds)
+            edge = float(away_prob) - market_prob
+
+            if 0.05 <= edge <= 0.12:
+                won = "away_win" == actual
+                profit = 10 * (float(away_odds) - 1) if won else -10
+                mw_stats[mw]["bets"] += 1
+                mw_stats[mw]["wins"] += int(won)
+                mw_stats[mw]["profit"] += profit
 
         return dict(mw_stats)
 
