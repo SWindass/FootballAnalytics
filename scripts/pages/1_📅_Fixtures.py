@@ -319,30 +319,14 @@ def load_matchweek_fixtures(matchweek: int):
                 .limit(1)
             ).scalar_one_or_none()
 
-            # Load value bets: away wins (5-12% edge) OR home wins (odds < 1.7, edge >= 10%)
-            # Both strategies validated by backtest at +20% ROI
-            from sqlalchemy import or_, and_
-
+            # Load ALL active value bets for this match
+            # Strategy filtering is done when value bets are created
+            from sqlalchemy.orm import joinedload
             value_bets = list(session.execute(
                 select(ValueBet)
+                .options(joinedload(ValueBet.strategy))
                 .where(ValueBet.match_id == match.id)
                 .where(ValueBet.is_active == True)
-                .where(
-                    or_(
-                        # Away win strategy: 5-12% edge
-                        and_(
-                            ValueBet.outcome == "away_win",
-                            ValueBet.edge >= 0.05,
-                            ValueBet.edge <= 0.12,
-                        ),
-                        # Home win strategy: odds < 1.7, edge >= 10%
-                        and_(
-                            ValueBet.outcome == "home_win",
-                            ValueBet.odds < 1.70,
-                            ValueBet.edge >= 0.10,
-                        ),
-                    )
-                )
                 .order_by(ValueBet.edge.desc())
             ).scalars().all())
 
@@ -643,13 +627,9 @@ for date_str, day_fixtures in fixtures_by_date.items():
                 st.markdown(f"**{home_name}** {home_score} - {away_score} **{away_name}**")
                 st.caption(f"FT • {kickoff_time}" + (f" • Form: {form_str}" if form_str else ""))
             else:
-                # Add VALUE BET badge if value bet exists
+                # Add VALUE BET indicator if value bet exists
                 if value_bets:
-                    best_edge = float(value_bets[0].edge)
-                    if best_edge >= 0.05:  # 5%+ edge threshold
-                        st.markdown(f"**{home_name}** vs **{away_name}** :green-background[💰 VALUE BET]")
-                    else:
-                        st.markdown(f"**{home_name}** vs **{away_name}**")
+                    st.markdown(f"**{home_name}** vs **{away_name}** :green-background[💰 VALUE]")
                 else:
                     st.markdown(f"**{home_name}** vs **{away_name}**")
                 st.caption(kickoff_time + (f" • Form: {form_str}" if form_str else ""))
@@ -710,14 +690,25 @@ for date_str, day_fixtures in fixtures_by_date.items():
                         st.markdown("✅")
                     else:
                         st.markdown("❌")
-            elif value_bets:
-                best = value_bets[0]
-                edge_pct = float(best.edge)
-                outcome_short = {"home_win": "H", "draw": "D", "away_win": "A"}.get(best.outcome, "?")
-                # Show prominent value indicator with bet type
-                st.markdown(f"**{outcome_short}**")
-                st.markdown(f":green[**+{edge_pct:.0%}**]")
-                st.caption(f"{float(best.odds):.2f}")
+
+        # Deduplicate value bets - keep best odds per outcome
+        unique_value_bets = {}
+        for vb in value_bets:
+            outcome = vb.outcome
+            if outcome not in unique_value_bets or float(vb.odds) > float(unique_value_bets[outcome].odds):
+                unique_value_bets[outcome] = vb
+        value_bets_deduped = list(unique_value_bets.values())
+
+        # Show prominent value bet callout for upcoming matches
+        if not is_finished and value_bets_deduped:
+            best = value_bets_deduped[0]
+            outcome_full = {"home_win": f"Back {home_name}", "draw": "Back the Draw", "away_win": f"Back {away_name}"}.get(best.outcome, "?")
+            odds_dec = float(best.odds)
+            odds_frac = decimal_to_fraction(odds_dec)
+            edge_pct = float(best.edge)
+            kelly = float(best.kelly_stake)
+
+            st.success(f"💰 **VALUE BET: {outcome_full}** @ {odds_frac} ({odds_dec:.2f}) — Edge: **+{edge_pct:.1%}** • Kelly stake: {kelly:.1%}")
 
         # Expandable details
         if analysis and analysis.consensus_home_prob:
@@ -765,13 +756,16 @@ for date_str, day_fixtures in fixtures_by_date.items():
                     if extras:
                         st.markdown(" | ".join(extras))
 
-                    if value_bets:
-                        st.markdown("**Value Bets:**")
-                        for vb in value_bets[:3]:
+                    if value_bets_deduped:
+                        st.markdown("**💰 Value Bets:**")
+                        for vb in value_bets_deduped:
                             outcome = vb.outcome.replace("_", " ").title()
                             odds_dec = float(vb.odds)
                             odds_frac = decimal_to_fraction(odds_dec)
-                            st.markdown(f"- {outcome} @ {odds_frac} ({odds_dec:.2f}) via {vb.bookmaker} — {float(vb.edge):.1%} edge")
+                            strategy_name = ""
+                            if hasattr(vb, 'strategy') and vb.strategy:
+                                strategy_name = f" [{vb.strategy.name.replace('_', ' ').title()}]"
+                            st.markdown(f"- **{outcome}** @ {odds_frac} ({odds_dec:.2f}) — **+{float(vb.edge):.1%} edge** • Kelly: {float(vb.kelly_stake):.1%}{strategy_name}")
 
                 # ELO History Chart
                 home_elo = load_elo_history(fixture["home_team_id"], fixture["season"])
@@ -799,35 +793,38 @@ if any(f["value_bets"] for f in fixtures):
         "**Home wins** (odds < 1.70, edge ≥ 10%, reliable teams): +21% ROI, 83% win rate"
     )
 
-    all_vb = []
+    # Deduplicate: keep best odds per match+outcome
+    best_bets = {}  # (match_id, outcome) -> best value bet
     for f in fixtures:
+        for vb in f["value_bets"]:
+            key = (f["id"], vb.outcome)
+            if key not in best_bets or float(vb.odds) > float(best_bets[key]["vb"].odds):
+                best_bets[key] = {"fixture": f, "vb": vb}
+
+    unique = []
+    for (match_id, outcome), data in best_bets.items():
+        f = data["fixture"]
+        vb = data["vb"]
         home = teams.get(f["home_team_id"], {}).get("short_name", "?")
         away = teams.get(f["away_team_id"], {}).get("short_name", "?")
-        for vb in f["value_bets"]:
-            odds_dec = float(vb.odds)
-            bet_type = "Home Win" if vb.outcome == "home_win" else "Away Win"
-            all_vb.append({
-                "Match": f"{home} v {away}",
-                "Kick-off": f["kickoff"].strftime("%a %H:%M"),
-                "Bet": bet_type,
-                "Odds": f"{decimal_to_fraction(odds_dec)} ({odds_dec:.2f})",
-                "Bookmaker": vb.bookmaker,
-                "Edge": f"+{float(vb.edge):.1%}",
-                "Kelly Stake": f"{float(vb.kelly_stake):.1%}",
-            })
+        odds_dec = float(vb.odds)
+        bet_type = {"home_win": "Home Win", "away_win": "Away Win", "draw": "Draw"}.get(vb.outcome, vb.outcome)
+        strategy_name = ""
+        if hasattr(vb, 'strategy') and vb.strategy:
+            strategy_name = vb.strategy.name.replace('_', ' ').title()
+        unique.append({
+            "Match": f"{home} v {away}",
+            "Kick-off": f["kickoff"].strftime("%a %H:%M"),
+            "Bet": bet_type,
+            "Odds": f"{decimal_to_fraction(odds_dec)} ({odds_dec:.2f})",
+            "Edge": f"+{float(vb.edge):.1%}",
+            "Kelly": f"{float(vb.kelly_stake):.1%}",
+            "Strategy": strategy_name or "-",
+        })
 
-    all_vb.sort(key=lambda x: float(x["Edge"].lstrip("+").rstrip("%")), reverse=True)
-
-    # Dedupe by match+bet combination
-    seen = set()
-    unique = []
-    for vb in all_vb:
-        key = (vb["Match"], vb["Bet"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(vb)
+    unique.sort(key=lambda x: float(x["Edge"].lstrip("+").rstrip("%")), reverse=True)
 
     if unique:
         st.dataframe(unique, use_container_width=True, hide_index=True)
-        total_kelly = sum(float(vb["Kelly Stake"].rstrip("%")) for vb in unique)
+        total_kelly = sum(float(vb["Kelly"].rstrip("%")) for vb in unique)
         st.markdown(f"**Total recommended stake: {total_kelly:.1f}%** of bankroll across {len(unique)} bets")
