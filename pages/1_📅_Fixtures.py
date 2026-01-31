@@ -261,9 +261,19 @@ st.markdown("""
     min-height: 44px !important;
     width: 100% !important;
     display: flex !important;
-    justify-content: center !important;
     align-items: center !important;
-    text-align: center !important;
+}
+
+/* Home team - right aligned */
+[data-testid="stHorizontalBlock"] > div:nth-child(1) button {
+    justify-content: flex-end !important;
+    text-align: right !important;
+}
+
+/* Away team - left aligned */
+[data-testid="stHorizontalBlock"] > div:nth-child(5) button {
+    justify-content: flex-start !important;
+    text-align: left !important;
 }
 [data-testid="stHorizontalBlock"] button:hover {
     background: transparent !important;
