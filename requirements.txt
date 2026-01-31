@@ -1,2 +1,35 @@
-# Minimal requirements for Streamlit Cloud testing
+# Requirements for Streamlit Cloud deployment
+# This is a subset of the main requirements.txt optimized for the dashboard
+
+# Streamlit
 streamlit>=1.32.0
+
+# Database
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+
+# Pydantic
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+
+# Data Science / ML
+numpy>=1.26.3
+scipy>=1.12.0
+scikit-learn>=1.4.0
+xgboost>=2.0.3
+pandas>=2.1.4
+
+# PyTorch (CPU only for Streamlit Cloud)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
+# Utilities
+python-dotenv>=1.0.0
+structlog>=24.1.0
+
+# HTTP Client (for data fetching)
+httpx>=0.26.0
+tenacity>=8.2.3
+
+# Charts
+plotly>=5.18.0
