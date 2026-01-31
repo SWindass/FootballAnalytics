@@ -2,9 +2,11 @@
 import sys
 from pathlib import Path
 project_root = Path(__file__).parent.parent
+scripts_dir = str(project_root / "scripts")
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
-    sys.path.insert(0, str(project_root / "scripts"))
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
 
 # Initialize database with Streamlit secrets BEFORE other imports
 import db_init  # noqa: F401
