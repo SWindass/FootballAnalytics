@@ -27,4 +27,4 @@ if not user:
     login_form()
     show_install_prompt()
 else:
-    st.switch_page("scripts/pages/1_📅_Fixtures.py")
+    st.switch_page("pages/1_📅_Fixtures.py")

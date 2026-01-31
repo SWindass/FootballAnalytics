@@ -72,7 +72,7 @@ def require_auth(allowed_roles: list[str] | None = None):
     user = get_current_user()
 
     if not user:
-        st.switch_page("Home.py")
+        st.switch_page("streamlit_app.py")
         st.stop()
 
     if allowed_roles and user["role"] not in allowed_roles:
