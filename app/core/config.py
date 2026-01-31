@@ -12,9 +12,10 @@ def _load_streamlit_secrets():
         import streamlit as st
         if hasattr(st, 'secrets') and len(st.secrets) > 0:
             # Export Streamlit secrets as environment variables
+            # Use direct assignment to override any existing values
             for key, value in st.secrets.items():
                 if isinstance(value, str):
-                    os.environ.setdefault(key.upper(), value)
+                    os.environ[key.upper()] = value
     except Exception:
         pass  # Not running in Streamlit context
 

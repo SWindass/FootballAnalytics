@@ -6,6 +6,9 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
     sys.path.insert(0, str(project_root / "scripts"))
 
+# Initialize database with Streamlit secrets BEFORE other imports
+import db_init  # noqa: F401
+
 import streamlit as st
 from datetime import datetime
 from decimal import Decimal
