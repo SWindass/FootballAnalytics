@@ -10,18 +10,6 @@ if str(project_root) not in sys.path:
 import db_init  # noqa: F401
 
 import streamlit as st
-st.set_page_config(page_title="Fixtures", page_icon="📅", layout="wide")
-
-import os
-
-# Debug: Show what database URL is being used
-import db_init
-st.write("DEBUG - Checking database configuration...")
-st.write(f"db_init loaded secrets: {db_init.DB_INIT_DEBUG['secrets_loaded']}")
-st.write(f"DATABASE_URL_SYNC from db_init: {db_init.DB_INIT_DEBUG['database_url_sync'][:50] if db_init.DB_INIT_DEBUG['database_url_sync'] != 'NOT SET' else 'NOT SET'}...")
-st.write(f"DATABASE_URL_SYNC env var now: {os.environ.get('DATABASE_URL_SYNC', 'NOT SET')[:50] if os.environ.get('DATABASE_URL_SYNC') else 'NOT SET'}...")
-st.write(f"Secrets available: {list(st.secrets.keys()) if hasattr(st, 'secrets') and len(st.secrets) > 0 else 'NONE'}")
-
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from itertools import groupby
@@ -33,19 +21,8 @@ from auth import require_auth, show_user_info
 from pwa import inject_pwa_tags
 
 settings = get_settings()
-st.write(f"Settings database_url_sync: {settings.database_url_sync[:50]}...")
 
-# Test database connection with error details
-try:
-    from sqlalchemy import text
-    from app.db.database import _get_sync_engine
-    engine = _get_sync_engine()
-    st.write(f"Engine URL: {str(engine.url)[:60]}...")
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT 1"))
-        st.success("Database connection successful!")
-except Exception as e:
-    st.error(f"Database connection failed: {type(e).__name__}: {str(e)}")
+st.set_page_config(page_title="Fixtures", page_icon="📅", layout="wide")
 
 # PWA support
 inject_pwa_tags()
