@@ -90,3 +90,8 @@ credentials.json
 # Database backups
 backup.sql
 *.dump
+
+# ngrok
+ngrok
+ngrok-*.tgz
+
