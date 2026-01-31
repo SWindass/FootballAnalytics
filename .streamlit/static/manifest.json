@@ -1,0 +1,36 @@
+{
+  "name": "Football Analytics",
+  "short_name": "Football",
+  "description": "EPL Value Bet Finder - Match predictions and betting insights",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e1117",
+  "theme_color": "#0e1117",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/app/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/app/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

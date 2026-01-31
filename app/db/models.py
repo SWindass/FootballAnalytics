@@ -166,6 +166,7 @@ class Team(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     external_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    fpl_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True)  # FPL API team ID
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     short_name: Mapped[str] = mapped_column(String(50), nullable=False)
     tla: Mapped[str] = mapped_column(String(3), nullable=False)  # Three-letter abbreviation
@@ -187,6 +188,7 @@ class Team(Base):
     elo_ratings: Mapped[list["EloRating"]] = relationship("EloRating", back_populates="team")
     team_stats: Mapped[list["TeamStats"]] = relationship("TeamStats", back_populates="team")
     manager_tenures: Mapped[list["ManagerTenure"]] = relationship("ManagerTenure", back_populates="team")
+    players: Mapped[list["Player"]] = relationship("Player", back_populates="team")
 
     def __repr__(self) -> str:
         return f"<Team {self.name}>"
@@ -652,3 +654,156 @@ class StrategyOptimizationRun(Base):
 
     def __repr__(self) -> str:
         return f"<OptimizationRun strategy={self.strategy_id} date={self.run_date}>"
+
+
+class PlayerStatus(str, Enum):
+    """Player availability status from FPL."""
+
+    AVAILABLE = "a"
+    DOUBTFUL = "d"
+    INJURED = "i"
+    SUSPENDED = "s"
+    UNAVAILABLE = "u"
+
+
+class PlayerPosition(str, Enum):
+    """Player position."""
+
+    GOALKEEPER = "GKP"
+    DEFENDER = "DEF"
+    MIDFIELDER = "MID"
+    FORWARD = "FWD"
+
+
+class Player(Base):
+    """Player data from FPL API.
+
+    Contains player-level statistics, form, and expected metrics
+    useful for team strength analysis and predictions.
+    """
+
+    __tablename__ = "players"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fpl_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
+
+    # Basic info
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    web_name: Mapped[str] = mapped_column(String(50), nullable=False)  # Short display name
+    position: Mapped[str] = mapped_column(String(3), nullable=False)  # GKP, DEF, MID, FWD
+
+    # Value and ownership
+    price: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False)  # In millions
+    selected_by_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+
+    # Season totals
+    total_points: Mapped[int] = mapped_column(Integer, default=0)
+    points_per_game: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=0)
+    minutes: Mapped[int] = mapped_column(Integer, default=0)
+    starts: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Goals and assists
+    goals_scored: Mapped[int] = mapped_column(Integer, default=0)
+    assists: Mapped[int] = mapped_column(Integer, default=0)
+    clean_sheets: Mapped[int] = mapped_column(Integer, default=0)
+    goals_conceded: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Form and ICT Index
+    form: Mapped[Decimal] = mapped_column(Numeric(4, 1), default=0)  # Recent form rating
+    influence: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
+    creativity: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
+    threat: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
+    ict_index: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
+
+    # Expected stats (season totals)
+    expected_goals: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    expected_assists: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    expected_goal_involvements: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    expected_goals_conceded: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+
+    # Availability
+    status: Mapped[str] = mapped_column(String(1), default="a")  # a, d, i, s, u
+    chance_of_playing: Mapped[Optional[int]] = mapped_column(Integer)  # 0-100
+    news: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    team: Mapped[Optional["Team"]] = relationship("Team", back_populates="players")
+    match_performances: Mapped[list["PlayerMatchPerformance"]] = relationship(
+        "PlayerMatchPerformance", back_populates="player"
+    )
+
+    __table_args__ = (
+        Index("ix_players_team", "team_id"),
+        Index("ix_players_position", "position"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Player {self.web_name}>"
+
+
+class PlayerMatchPerformance(Base):
+    """Player's performance in a specific match.
+
+    Tracks match-by-match stats from FPL for historical analysis
+    and pattern recognition.
+    """
+
+    __tablename__ = "player_match_performances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False)
+    match_id: Mapped[Optional[int]] = mapped_column(ForeignKey("matches.id"))
+
+    # Match context
+    season: Mapped[str] = mapped_column(String(10), nullable=False)
+    gameweek: Mapped[int] = mapped_column(Integer, nullable=False)
+    opponent_team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
+    was_home: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    # Playing time
+    minutes: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Points
+    total_points: Mapped[int] = mapped_column(Integer, default=0)
+    bonus: Mapped[int] = mapped_column(Integer, default=0)
+    bps: Mapped[int] = mapped_column(Integer, default=0)  # Bonus points system score
+
+    # Stats
+    goals_scored: Mapped[int] = mapped_column(Integer, default=0)
+    assists: Mapped[int] = mapped_column(Integer, default=0)
+    clean_sheets: Mapped[int] = mapped_column(Integer, default=0)
+    goals_conceded: Mapped[int] = mapped_column(Integer, default=0)
+
+    # ICT for this match
+    influence: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0)
+    creativity: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0)
+    threat: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0)
+    ict_index: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0)
+
+    # Expected stats for this match
+    expected_goals: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=0)
+    expected_assists: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=0)
+    expected_goal_involvements: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=0)
+
+    # Value at time of match
+    value: Mapped[Decimal] = mapped_column(Numeric(4, 1), default=0)
+    selected: Mapped[int] = mapped_column(Integer, default=0)  # Managers who selected
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    player: Mapped["Player"] = relationship("Player", back_populates="match_performances")
+    match: Mapped[Optional["Match"]] = relationship("Match")
+    opponent_team: Mapped[Optional["Team"]] = relationship("Team")
+
+    __table_args__ = (
+        Index("ix_player_perf_player_season", "player_id", "season"),
+        Index("ix_player_perf_gameweek", "season", "gameweek"),
+        UniqueConstraint("player_id", "season", "gameweek", name="uq_player_gameweek"),
+    )

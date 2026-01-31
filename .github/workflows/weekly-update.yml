@@ -29,6 +29,12 @@ jobs:
       - name: Install Playwright browsers
         run: playwright install chromium
 
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          alembic upgrade head
+
       - name: Run results update
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -36,6 +42,13 @@ jobs:
           CURRENT_SEASON: "2025-26"
         run: |
           python -u batch/jobs/results_update.py
+
+      - name: Sync FPL player data
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CURRENT_SEASON: "2025-26"
+        run: |
+          python -u batch/jobs/fpl_sync.py
 
       - name: Summary
         if: always()
