@@ -35,6 +35,18 @@ from pwa import inject_pwa_tags
 settings = get_settings()
 st.write(f"Settings database_url_sync: {settings.database_url_sync[:50]}...")
 
+# Test database connection with error details
+try:
+    from sqlalchemy import text
+    from app.db.database import _get_sync_engine
+    engine = _get_sync_engine()
+    st.write(f"Engine URL: {str(engine.url)[:60]}...")
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT 1"))
+        st.success("Database connection successful!")
+except Exception as e:
+    st.error(f"Database connection failed: {type(e).__name__}: {str(e)}")
+
 # PWA support
 inject_pwa_tags()
 
