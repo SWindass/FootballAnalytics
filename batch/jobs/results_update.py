@@ -16,8 +16,11 @@ from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
 from app.db.models import EloRating, Match, MatchStatus, Team, TeamStats, ValueBet
 from batch.data_sources.football_data_org import FootballDataClient, parse_match
-from batch.data_sources.understat import UnderstatScraper, parse_understat_match
 from batch.models.elo import EloRatingSystem
+
+# Lazy import for understat - playwright may not be available on all platforms
+UnderstatScraper = None
+parse_understat_match = None
 from batch.models.neural_stacker import NeuralStacker
 
 logger = structlog.get_logger()
@@ -140,6 +143,13 @@ class ResultsUpdateJob:
 
     async def _update_xg_data(self) -> int:
         """Fetch and update xG data from Understat."""
+        # Lazy import - playwright may not be available on all platforms (e.g., Streamlit Cloud)
+        try:
+            from batch.data_sources.understat import UnderstatScraper, parse_understat_match
+        except ImportError as e:
+            logger.warning(f"Understat scraper not available (missing playwright?): {e}")
+            return 0
+
         scraper = UnderstatScraper()
         try:
             # Get all finished matches without xG
