@@ -1,0 +1,61 @@
+name: Weekly Analysis
+
+on:
+  schedule:
+    # Tuesday at 5PM UTC
+    - cron: '0 17 * * 2'
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  weekly-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Calculate ELO ratings
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python -m batch.jobs.calculate_elo
+
+      - name: Calculate Poisson model
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python -m batch.jobs.calculate_poisson
+
+      - name: Calculate XGBoost predictions
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python -m batch.jobs.calculate_xgboost
+
+      - name: Calculate consensus
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python -m batch.jobs.calculate_consensus
+
+      - name: Generate value bets
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python -m batch.jobs.backfill_value_bets
+
+      - name: Generate AI narratives
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python -m batch.jobs.generate_narratives

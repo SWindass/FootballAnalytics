@@ -1,0 +1,14 @@
+name: Keep Alive
+
+on:
+  schedule:
+    # Every 5 minutes during UK daytime (7am-11pm)
+    - cron: '*/5 7-23 * * *'
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit app
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" ${{ secrets.STREAMLIT_APP_URL }} || true

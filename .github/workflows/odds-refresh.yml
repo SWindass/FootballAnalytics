@@ -1,0 +1,39 @@
+name: Odds Refresh
+
+on:
+  schedule:
+    # Saturday at 8AM UTC (before weekend matches)
+    - cron: '0 8 * * 6'
+    # Also Friday evening for early Saturday games
+    - cron: '0 18 * * 5'
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  refresh-odds:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Refresh odds
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python -m batch.jobs.odds_refresh
+
+      - name: Recalculate value bets with new odds
+        env:
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+        run: |
+          python -m batch.jobs.backfill_value_bets

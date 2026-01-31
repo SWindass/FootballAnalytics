@@ -1,2 +1,32 @@
+"""Football Analytics Dashboard - Login Page."""
+
 import streamlit as st
-st.write("Hello World")
+from auth import login_form, get_current_user, logout
+from pwa import inject_pwa_tags, show_install_prompt
+
+st.set_page_config(
+    page_title="Football Analytics - Login",
+    page_icon="⚽",
+    layout="wide",
+)
+
+# PWA support
+inject_pwa_tags()
+
+# Check for logout request
+if st.query_params.get("logout"):
+    logout()
+
+# Check if user is logged in
+user = get_current_user()
+
+if not user:
+    # Show login form
+    st.title("⚽ Football Analytics")
+    st.caption("EPL Value Bet Finder")
+    login_form()
+    # Show install prompt on login page
+    show_install_prompt()
+else:
+    # User is logged in - redirect to Fixtures
+    st.switch_page("pages/1_📅_Fixtures.py")
