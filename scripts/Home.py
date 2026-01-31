@@ -1,11 +1,24 @@
 """Football Analytics Dashboard - Home Page."""
 
-import streamlit as st
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, func
+import sys
+import os
 
-from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchStatus, ValueBet, Team
+# Ensure the project root is in the path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import streamlit as st
+import traceback
+
+# Debug: Show any import errors
+try:
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select, func
+    from app.db.database import SyncSessionLocal
+    from app.db.models import Match, MatchStatus, ValueBet, Team
+except Exception as e:
+    st.error(f"Import error: {e}")
+    st.code(traceback.format_exc())
+    st.stop()
 
 st.set_page_config(
     page_title="Football Analytics",
