@@ -17,7 +17,7 @@ from itertools import groupby
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus, Team, TeamStats, OddsHistory, ValueBet
 from app.core.config import get_settings
-from auth import require_auth, show_user_info
+from auth import require_auth, show_user_info, get_current_user
 from pwa import inject_pwa_tags
 
 settings = get_settings()
@@ -195,6 +195,24 @@ with st.sidebar:
         )
     else:
         selected_mw = current_mw
+
+    # Admin-only: Update Scores button
+    user = get_current_user()
+    if user and user.get("role") == "admin":
+        st.divider()
+        if st.button("🔄 Update Scores", use_container_width=True):
+            with st.spinner("Updating scores..."):
+                try:
+                    from batch.jobs.results_update import run_results_update
+                    result = run_results_update()
+                    st.success(f"Updated {result['matches_updated']} matches")
+                    if result.get('bets_resolved', 0) > 0:
+                        st.info(f"Resolved {result['bets_resolved']} value bets")
+                    # Clear cached data to show fresh results
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Update failed: {e}")
 
     st.divider()
     st.caption("**Legend**")
