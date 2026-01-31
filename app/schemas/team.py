@@ -22,6 +22,7 @@ class TeamResponse(TeamBase):
     external_id: int
     crest_url: Optional[str] = None
     venue: Optional[str] = None
+    form: Optional[str] = None  # Last 5 results e.g. "WWDLW"
 
 
 class TeamStatsResponse(BaseModel):

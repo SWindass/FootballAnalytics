@@ -18,6 +18,7 @@ from app.db.models import EloRating, Match, MatchStatus, Team, TeamStats, ValueB
 from batch.data_sources.football_data_org import FootballDataClient, parse_match
 from batch.data_sources.understat import UnderstatScraper, parse_understat_match
 from batch.models.elo import EloRatingSystem
+from batch.models.neural_stacker import NeuralStacker
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -64,6 +65,9 @@ class ResultsUpdateJob:
 
             self.session.commit()
 
+            # 7. Retrain neural stacker if enough new data
+            model_retrained = self._retrain_neural_stacker(updated_count)
+
             duration = (datetime.utcnow() - start_time).total_seconds()
             logger.info(
                 "Results update completed",
@@ -72,6 +76,7 @@ class ResultsUpdateJob:
                 elo_updated=elo_updated,
                 stats_updated=stats_updated,
                 bets_resolved=bets_resolved,
+                model_retrained=model_retrained,
                 duration_seconds=duration,
             )
 
@@ -82,6 +87,7 @@ class ResultsUpdateJob:
                 "elo_recalculated": elo_updated,
                 "stats_updated": stats_updated,
                 "bets_resolved": bets_resolved,
+                "model_retrained": model_retrained,
                 "duration_seconds": duration,
             }
 
@@ -202,8 +208,8 @@ class ResultsUpdateJob:
         # Initialize ELO system
         self.elo = EloRatingSystem()
 
-        # Track which matchweeks have new ratings
-        updated_matchweeks = set()
+        # Track ratings per matchweek (must capture rating at time of match)
+        matchweek_ratings: dict[int, dict[int, float]] = {}  # matchweek -> {team_id -> rating}
 
         for match in matches:
             if match.home_score is None or match.away_score is None:
@@ -217,11 +223,17 @@ class ResultsUpdateJob:
                 match.away_score,
             )
 
-            updated_matchweeks.add(match.matchweek)
+            # Store ratings at this matchweek (capture progressive state)
+            if match.matchweek not in matchweek_ratings:
+                matchweek_ratings[match.matchweek] = {}
 
-        # Save updated ratings
-        for matchweek in updated_matchweeks:
-            for team_id, rating in self.elo.ratings.items():
+            # Record current rating for both teams after this match
+            matchweek_ratings[match.matchweek][match.home_team_id] = self.elo.get_rating(match.home_team_id)
+            matchweek_ratings[match.matchweek][match.away_team_id] = self.elo.get_rating(match.away_team_id)
+
+        # Save ratings per matchweek
+        for matchweek, team_ratings in matchweek_ratings.items():
+            for team_id, rating in team_ratings.items():
                 existing = self.session.execute(
                     select(EloRating)
                     .where(EloRating.team_id == team_id)
@@ -240,7 +252,7 @@ class ResultsUpdateJob:
                     )
                     self.session.add(new_rating)
 
-        return len(updated_matchweeks)
+        return len(matchweek_ratings)
 
     def _update_team_stats(self) -> int:
         """Update team statistics based on results."""
@@ -437,6 +449,55 @@ class ResultsUpdateJob:
             resolved += 1
 
         return resolved
+
+    def _retrain_neural_stacker(self, matches_updated: int) -> bool:
+        """Retrain neural stacker model if new results are available.
+
+        Args:
+            matches_updated: Number of matches updated in this run
+
+        Returns:
+            True if model was retrained, False otherwise
+        """
+        # Only retrain if there were new results
+        if matches_updated == 0:
+            logger.debug("No new results, skipping neural stacker retrain")
+            return False
+
+        # Check if we have enough finished matches for meaningful training
+        stmt = (
+            select(Match)
+            .where(Match.status == MatchStatus.FINISHED)
+        )
+        total_finished = len(list(self.session.execute(stmt).scalars().all()))
+
+        # Require at least 100 finished matches to retrain
+        if total_finished < 100:
+            logger.info(f"Only {total_finished} finished matches, need 100+ for retraining")
+            return False
+
+        try:
+            logger.info(f"Retraining neural stacker with {total_finished} matches")
+            stacker = NeuralStacker()
+
+            # Train with slightly fewer epochs for incremental updates
+            metrics = stacker.train(
+                epochs=50,  # Fewer epochs for incremental training
+                batch_size=32,
+                learning_rate=0.001,
+                validation_split=0.2,
+            )
+
+            logger.info(
+                "Neural stacker retrained",
+                val_accuracy=f"{metrics['best_val_acc']:.1%}",
+                train_samples=metrics['train_samples'],
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to retrain neural stacker: {e}")
+            return False
 
 
 def run_results_update():

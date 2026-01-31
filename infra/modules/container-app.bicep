@@ -166,3 +166,4 @@ resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
 output name string = containerApp.name
 output url string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
 output id string = containerApp.id
+output environmentId string = containerAppEnv.id

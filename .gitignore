@@ -85,3 +85,8 @@ secrets/
 *.pem
 *.key
 credentials.json
+.streamlit/secrets.toml
+
+# Database backups
+backup.sql
+*.dump

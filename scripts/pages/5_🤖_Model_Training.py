@@ -306,18 +306,16 @@ with tab1:
             )
             mw_results = mw_session.execute(stmt).all()
 
-            # Group by season and matchweek
-            mw_stats = defaultdict(lambda: {"correct": 0, "total": 0})
+            # Group by season and matchweek - track both model and market odds
+            mw_stats = defaultdict(lambda: {
+                "model_correct": 0, "model_total": 0,
+                "market_correct": 0, "market_total": 0
+            })
 
             for match, analysis in mw_results:
                 key = (match.season, match.matchweek)
 
-                home_prob = float(analysis.consensus_home_prob)
-                draw_prob = float(analysis.consensus_draw_prob)
-                away_prob = float(analysis.consensus_away_prob)
-
-                predicted = np.argmax([home_prob, draw_prob, away_prob])
-
+                # Determine actual outcome
                 if match.home_score > match.away_score:
                     actual = 0
                 elif match.home_score < match.away_score:
@@ -325,14 +323,35 @@ with tab1:
                 else:
                     actual = 1
 
-                mw_stats[key]["total"] += 1
-                if predicted == actual:
-                    mw_stats[key]["correct"] += 1
+                # Model prediction
+                home_prob = float(analysis.consensus_home_prob)
+                draw_prob = float(analysis.consensus_draw_prob)
+                away_prob = float(analysis.consensus_away_prob)
+                model_predicted = np.argmax([home_prob, draw_prob, away_prob])
+
+                mw_stats[key]["model_total"] += 1
+                if model_predicted == actual:
+                    mw_stats[key]["model_correct"] += 1
+
+                # Market odds prediction (if available)
+                if analysis.features:
+                    hist_odds = analysis.features.get("historical_odds", {})
+                    if hist_odds and hist_odds.get("implied_home_prob"):
+                        market_probs = [
+                            hist_odds.get("implied_home_prob", 0),
+                            hist_odds.get("implied_draw_prob", 0),
+                            hist_odds.get("implied_away_prob", 0)
+                        ]
+                        market_predicted = np.argmax(market_probs)
+
+                        mw_stats[key]["market_total"] += 1
+                        if market_predicted == actual:
+                            mw_stats[key]["market_correct"] += 1
 
             # Filter to complete matchweeks (10 matches) and recent seasons
             complete_mws = [
                 (k, v) for k, v in sorted(mw_stats.items())
-                if v["total"] >= 8  # Allow slightly incomplete weeks
+                if v["model_total"] >= 8  # Allow slightly incomplete weeks
             ]
 
             # Take last 40 matchweeks for display
@@ -340,26 +359,44 @@ with tab1:
 
             if recent_mws:
                 x_labels = [f"{k[0][-5:]}\nMW{k[1]}" for k, v in recent_mws]
-                y_values = [v["correct"] / v["total"] * 100 for k, v in recent_mws]
+                model_values = [v["model_correct"] / v["model_total"] * 100 for k, v in recent_mws]
+                market_values = [
+                    v["market_correct"] / v["market_total"] * 100 if v["market_total"] > 0 else None
+                    for k, v in recent_mws
+                ]
 
                 fig = go.Figure()
 
+                # Model accuracy as bars
                 fig.add_trace(go.Bar(
                     x=list(range(len(x_labels))),
-                    y=y_values,
-                    marker_color=['#E74C3C' if y < 33.3 else '#2E86AB' for y in y_values],
-                    text=[f"{y:.0f}%" for y in y_values],
+                    y=model_values,
+                    name="Model",
+                    marker_color=['#E74C3C' if y < 33.3 else '#2E86AB' for y in model_values],
+                    text=[f"{y:.0f}%" for y in model_values],
                     textposition='outside',
                 ))
+
+                # Market odds accuracy as line overlay
+                valid_market = [(i, v) for i, v in enumerate(market_values) if v is not None]
+                if valid_market:
+                    fig.add_trace(go.Scatter(
+                        x=[i for i, v in valid_market],
+                        y=[v for i, v in valid_market],
+                        name="Market Odds",
+                        mode='lines+markers',
+                        line=dict(color='#F18F01', width=3),
+                        marker=dict(size=8),
+                    ))
 
                 fig.add_hline(y=33.3, line_dash="dash", line_color="gray",
                              annotation_text="Random (33.3%)")
 
                 fig.update_layout(
-                    title="Prediction Accuracy by Completed Matchweek",
+                    title="Model vs Market Odds Accuracy by Matchweek",
                     xaxis_title="Season / Matchweek",
                     yaxis_title="Accuracy %",
-                    yaxis=dict(range=[0, 80]),
+                    yaxis=dict(range=[0, 100]),
                     xaxis=dict(
                         tickmode='array',
                         tickvals=list(range(len(x_labels))),
@@ -367,12 +404,13 @@ with tab1:
                         tickangle=45,
                     ),
                     height=450,
-                    showlegend=False,
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
 
-                st.caption("Red bars indicate matchweeks where accuracy fell below random (33.3%)")
+                st.caption("Blue/red bars = Model accuracy | Orange line = Market odds accuracy | Red bars = below random (33.3%)")
             else:
                 st.info("Not enough completed matchweeks to display")
     else:

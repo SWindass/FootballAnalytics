@@ -24,6 +24,7 @@ from typing import Optional
 import httpx
 import structlog
 from sqlalchemy import select, update
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchStatus, Team
@@ -145,6 +146,16 @@ TEAM_MAPPING = {
     "Blackpool": "Blackpool FC",
     "Cardiff": "Cardiff City FC",
     "Huddersfield": "Huddersfield Town AFC",
+    "Charlton": "Charlton Athletic FC",
+    "Portsmouth": "Portsmouth FC",
+    "Derby": "Derby County FC",
+    "Coventry": "Coventry City FC",
+    "Sheffield Weds": "Sheffield Wednesday FC",
+    "Bradford": "Bradford City AFC",
+    "Wimbledon": "Wimbledon FC",
+    "Oldham": "Oldham Athletic AFC",
+    "Swindon": "Swindon Town FC",
+    "Barnsley": "Barnsley FC",
 }
 
 
@@ -219,6 +230,18 @@ def download_season_odds(season: str) -> list[HistoricalOdds]:
                 avg_home = parse_float(row.get("B365H", ""))
                 avg_draw = parse_float(row.get("B365D", ""))
                 avg_away = parse_float(row.get("B365A", ""))
+
+            # Fall back to William Hill for older seasons (2000-02)
+            if not avg_home or not avg_draw or not avg_away:
+                avg_home = parse_float(row.get("WHH", ""))
+                avg_draw = parse_float(row.get("WHD", ""))
+                avg_away = parse_float(row.get("WHA", ""))
+
+            # Fall back to Ladbrokes for very old seasons
+            if not avg_home or not avg_draw or not avg_away:
+                avg_home = parse_float(row.get("LBH", ""))
+                avg_draw = parse_float(row.get("LBD", ""))
+                avg_away = parse_float(row.get("LBA", ""))
 
             # Skip if still no odds available
             if not avg_home or not avg_draw or not avg_away:
@@ -331,7 +354,8 @@ def match_odds_to_database(odds_list: list[HistoricalOdds], season: str) -> dict
             ).scalar_one_or_none()
 
             if analysis:
-                features = analysis.features or {}
+                # Create a new dict to ensure SQLAlchemy detects the change
+                features = dict(analysis.features or {})
                 features["historical_odds"] = {
                     "avg_home_odds": odds.avg_home_odds,
                     "avg_draw_odds": odds.avg_draw_odds,
@@ -346,6 +370,7 @@ def match_odds_to_database(odds_list: list[HistoricalOdds], season: str) -> dict
                     "avg_under_2_5_odds": odds.avg_under_2_5_odds,
                 }
                 analysis.features = features
+                flag_modified(analysis, "features")
                 updated += 1
 
         session.commit()

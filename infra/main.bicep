@@ -1,5 +1,5 @@
 // Main Bicep template for FootballAnalytics infrastructure
-// Deploys: Container App, PostgreSQL, Key Vault, Container Registry, Azure Functions
+// Deploys: Container Apps (API + Streamlit), PostgreSQL, Key Vault, Container Registry, Azure Functions
 
 targetScope = 'resourceGroup'
 
@@ -105,6 +105,25 @@ module containerApp 'modules/container-app.bicep' = {
   ]
 }
 
+// Streamlit Dashboard (shares environment with API)
+module streamlitApp 'modules/container-app-streamlit.bicep' = {
+  name: 'streamlit-deployment'
+  params: {
+    name: '${prefix}-dashboard-${environment}'
+    location: location
+    tags: tags
+    containerRegistryName: acr.outputs.name
+    containerImage: '${acr.outputs.loginServer}/footballanalytics-streamlit:latest'
+    containerAppEnvId: containerApp.outputs.environmentId
+    postgresConnectionString: 'postgresql://faadmin:${postgresPassword}@${postgres.outputs.fqdn}:5432/football?sslmode=require'
+  }
+  dependsOn: [
+    acr
+    containerApp
+    postgres
+  ]
+}
+
 // Azure Functions for scheduled jobs
 module functions 'modules/functions.bicep' = {
   name: 'functions-deployment'
@@ -122,7 +141,8 @@ module functions 'modules/functions.bicep' = {
 }
 
 // Outputs
-output containerAppUrl string = containerApp.outputs.url
+output apiUrl string = containerApp.outputs.url
+output dashboardUrl string = streamlitApp.outputs.url
 output containerRegistryLoginServer string = acr.outputs.loginServer
 output postgresHost string = postgres.outputs.fqdn
 output keyVaultName string = keyVault.outputs.name

@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.config import get_settings
 from app.db.database import get_async_session
-from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, Team, ValueBet
+from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, Team, TeamStats, ValueBet
 from app.schemas.match import (
     AdditionalPredictions,
     MatchAnalysisResponse,
@@ -72,8 +72,18 @@ def build_predictions(analysis: Optional[MatchAnalysis]) -> Optional[MatchAnalys
     )
 
 
-def build_match_detail(match: Match) -> MatchDetailResponse:
-    """Build detailed match response."""
+def build_match_detail(
+    match: Match,
+    team_forms: dict[int, str] = None,
+) -> MatchDetailResponse:
+    """Build detailed match response.
+
+    Args:
+        match: Match object
+        team_forms: Dict mapping team_id to form string (e.g., "WWDLW")
+    """
+    team_forms = team_forms or {}
+
     # Get latest odds per bookmaker
     latest_odds = []
     if match.odds_history:
@@ -97,6 +107,13 @@ def build_match_detail(match: Match) -> MatchDetailResponse:
             for o in bookmaker_odds.values()
         ]
 
+    # Build team responses with form
+    home_team_data = TeamResponse.model_validate(match.home_team)
+    home_team_data.form = team_forms.get(match.home_team_id)
+
+    away_team_data = TeamResponse.model_validate(match.away_team)
+    away_team_data.form = team_forms.get(match.away_team_id)
+
     return MatchDetailResponse(
         id=match.id,
         external_id=match.external_id,
@@ -104,8 +121,8 @@ def build_match_detail(match: Match) -> MatchDetailResponse:
         matchweek=match.matchweek,
         kickoff_time=match.kickoff_time,
         status=match.status,
-        home_team=TeamResponse.model_validate(match.home_team),
-        away_team=TeamResponse.model_validate(match.away_team),
+        home_team=home_team_data,
+        away_team=away_team_data,
         home_score=match.home_score,
         away_score=match.away_score,
         home_xg=match.home_xg,
@@ -169,7 +186,34 @@ async def get_current_matchweek(
     result = await session.execute(stmt)
     matches = result.unique().scalars().all()
 
-    match_details = [build_match_detail(m) for m in matches]
+    # Fetch team form data (latest available stats for each team)
+    team_ids = set()
+    for m in matches:
+        team_ids.add(m.home_team_id)
+        team_ids.add(m.away_team_id)
+
+    # Get the most recent stats for each team
+    from sqlalchemy import func
+    subq = (
+        select(
+            TeamStats.team_id,
+            func.max(TeamStats.matchweek).label("max_mw")
+        )
+        .where(TeamStats.season == settings.current_season)
+        .where(TeamStats.team_id.in_(team_ids))
+        .group_by(TeamStats.team_id)
+        .subquery()
+    )
+    stmt = (
+        select(TeamStats)
+        .join(subq, (TeamStats.team_id == subq.c.team_id) & (TeamStats.matchweek == subq.c.max_mw))
+        .where(TeamStats.season == settings.current_season)
+    )
+    result = await session.execute(stmt)
+    team_stats = result.scalars().all()
+    team_forms = {ts.team_id: ts.form for ts in team_stats if ts.form}
+
+    match_details = [build_match_detail(m, team_forms) for m in matches]
     matches_with_value = sum(1 for m in matches if m.value_bets)
 
     return MatchweekResponse(
@@ -213,7 +257,35 @@ async def get_matchweek(
     if not matches:
         raise HTTPException(status_code=404, detail=f"Matchweek {matchweek} not found")
 
-    match_details = [build_match_detail(m) for m in matches]
+    # Fetch team form data (latest available stats for each team)
+    team_ids = set()
+    for m in matches:
+        team_ids.add(m.home_team_id)
+        team_ids.add(m.away_team_id)
+
+    # Get the most recent stats for each team up to this matchweek
+    from sqlalchemy import func
+    subq = (
+        select(
+            TeamStats.team_id,
+            func.max(TeamStats.matchweek).label("max_mw")
+        )
+        .where(TeamStats.season == target_season)
+        .where(TeamStats.team_id.in_(team_ids))
+        .where(TeamStats.matchweek <= matchweek)
+        .group_by(TeamStats.team_id)
+        .subquery()
+    )
+    stmt = (
+        select(TeamStats)
+        .join(subq, (TeamStats.team_id == subq.c.team_id) & (TeamStats.matchweek == subq.c.max_mw))
+        .where(TeamStats.season == target_season)
+    )
+    result = await session.execute(stmt)
+    team_stats = result.scalars().all()
+    team_forms = {ts.team_id: ts.form for ts in team_stats if ts.form}
+
+    match_details = [build_match_detail(m, team_forms) for m in matches]
     matches_with_value = sum(1 for m in matches if m.value_bets)
 
     return MatchweekResponse(

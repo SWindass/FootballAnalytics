@@ -20,6 +20,13 @@ class FootballDataClient:
     BASE_URL = "https://api.football-data.org/v4"
     COMPETITION_CODE = "PL"  # Premier League
 
+    # Supported competitions for fixture congestion tracking
+    COMPETITIONS = {
+        "PL": "Premier League",
+        "CL": "UEFA Champions League",
+        "EL": "UEFA Europa League",  # Not on free tier but included for completeness
+    }
+
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.football_data_api_key
         self.rate_limit = settings.football_data_rate_limit
@@ -117,6 +124,86 @@ class FootballDataClient:
         data = await self._make_request(f"teams/{team_id}/matches", params)
         return data.get("matches", [])
 
+    async def get_competition_matches(
+        self,
+        competition: str,
+        season: Optional[str] = None,
+        matchday: Optional[int] = None,
+        status: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Get matches for a specific competition.
+
+        Args:
+            competition: Competition code (PL, CL, etc.)
+            season: Season year (e.g., "2024" for 2024-25)
+            matchday: Specific matchday/gameweek
+            status: SCHEDULED, FINISHED, etc.
+            date_from: ISO date string
+            date_to: ISO date string
+        """
+        params = {}
+        if season:
+            params["season"] = season
+        if matchday:
+            params["matchday"] = matchday
+        if status:
+            params["status"] = status
+        if date_from:
+            params["dateFrom"] = date_from
+        if date_to:
+            params["dateTo"] = date_to
+
+        data = await self._make_request(f"competitions/{competition}/matches", params)
+        return data.get("matches", [])
+
+    async def get_all_team_matches(
+        self,
+        team_external_id: int,
+        season: Optional[str] = None,
+        competitions: list[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Get ALL matches for a team across multiple competitions.
+
+        This is useful for calculating accurate rest days.
+
+        Args:
+            team_external_id: Team's external ID from football-data.org
+            season: Season year
+            competitions: List of competition codes to include
+
+        Returns:
+            List of all matches sorted by date
+        """
+        if competitions is None:
+            competitions = ["PL", "CL"]  # Default to PL and CL
+
+        all_matches = []
+
+        # Fetch from each competition
+        for comp in competitions:
+            try:
+                matches = await self.get_competition_matches(
+                    competition=comp,
+                    season=season,
+                    status="FINISHED",
+                )
+                # Filter to matches involving this team
+                team_matches = [
+                    m for m in matches
+                    if m.get("homeTeam", {}).get("id") == team_external_id
+                    or m.get("awayTeam", {}).get("id") == team_external_id
+                ]
+                all_matches.extend(team_matches)
+            except Exception as e:
+                logger.warning(f"Failed to fetch {comp} matches: {e}")
+
+        # Sort by date
+        all_matches.sort(key=lambda m: m.get("utcDate", ""))
+
+        return all_matches
+
 
 def parse_match(match_data: dict[str, Any]) -> dict[str, Any]:
     """Parse match data from API response to our schema format."""
@@ -138,6 +225,19 @@ def parse_match(match_data: dict[str, Any]) -> dict[str, Any]:
         "CANCELLED": "cancelled",
     }
 
+    # Extract referee info (first referee in list is usually the main one)
+    referees = match_data.get("referees", [])
+    main_referee = None
+    for ref in referees:
+        if ref.get("type") == "REFEREE" or not main_referee:
+            main_referee = ref
+            if ref.get("type") == "REFEREE":
+                break
+
+    # Extract coach info
+    home_coach = match_data.get("homeTeam", {}).get("coach")
+    away_coach = match_data.get("awayTeam", {}).get("coach")
+
     return {
         "external_id": match_data["id"],
         "season": f"{match_data['season']['startDate'][:4]}-{match_data['season']['endDate'][2:4]}",
@@ -150,6 +250,29 @@ def parse_match(match_data: dict[str, Any]) -> dict[str, Any]:
         "away_score": full_time.get("away"),
         "home_ht_score": half_time.get("home"),
         "away_ht_score": half_time.get("away"),
+        # New fields
+        "referee": parse_referee(main_referee) if main_referee else None,
+        "home_coach": parse_coach(home_coach) if home_coach else None,
+        "away_coach": parse_coach(away_coach) if away_coach else None,
+    }
+
+
+def parse_referee(referee_data: dict[str, Any]) -> dict[str, Any]:
+    """Parse referee data from API response."""
+    return {
+        "external_id": referee_data.get("id"),
+        "name": referee_data.get("name", "Unknown"),
+        "nationality": referee_data.get("nationality"),
+    }
+
+
+def parse_coach(coach_data: dict[str, Any]) -> dict[str, Any]:
+    """Parse coach/manager data from API response."""
+    return {
+        "external_id": coach_data.get("id"),
+        "name": coach_data.get("name", "Unknown"),
+        "nationality": coach_data.get("nationality"),
+        "date_of_birth": coach_data.get("dateOfBirth"),
     }
 
 

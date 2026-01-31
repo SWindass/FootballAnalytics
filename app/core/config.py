@@ -1,8 +1,26 @@
 from functools import lru_cache
+import os
 from typing import Literal
 
 from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _load_streamlit_secrets():
+    """Load secrets from Streamlit Cloud if available."""
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and len(st.secrets) > 0:
+            # Export Streamlit secrets as environment variables
+            for key, value in st.secrets.items():
+                if isinstance(value, str):
+                    os.environ.setdefault(key.upper(), value)
+    except Exception:
+        pass  # Not running in Streamlit context
+
+
+# Load Streamlit secrets before Settings initialization
+_load_streamlit_secrets()
 
 
 class Settings(BaseSettings):
