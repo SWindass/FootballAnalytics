@@ -32,8 +32,15 @@ def _get_sync_engine():
     global _sync_engine
     if _sync_engine is None:
         settings = get_settings()
+        db_url = settings.database_url_sync
+
+        # Ensure SSL mode for Neon (and other cloud databases)
+        if "neon.tech" in db_url and "sslmode" not in db_url:
+            separator = "&" if "?" in db_url else "?"
+            db_url = f"{db_url}{separator}sslmode=require"
+
         _sync_engine = create_engine(
-            settings.database_url_sync,
+            db_url,
             echo=settings.debug,
             pool_pre_ping=True,
         )
