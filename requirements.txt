@@ -1,3 +1,6 @@
+# Streamlit Dashboard
+streamlit>=1.32.0
+
 # Core Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
@@ -26,7 +29,8 @@ scikit-learn>=1.4.0
 xgboost>=2.0.3
 pandas>=2.1.4
 optuna>=3.5.0
-# torch is installed separately in Dockerfile from CPU index
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 
 # Web Scraping
 beautifulsoup4>=4.12.3
