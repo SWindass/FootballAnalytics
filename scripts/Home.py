@@ -9,8 +9,16 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import streamlit as st
-from auth import login_form, get_current_user, logout
-from pwa import inject_pwa_tags, show_install_prompt
+
+# Debug: Show any import errors
+try:
+    from auth import login_form, get_current_user, logout
+    from pwa import inject_pwa_tags, show_install_prompt
+except Exception as e:
+    st.error(f"Import error: {e}")
+    st.code(f"sys.path: {sys.path}")
+    st.code(f"project_root: {project_root}")
+    st.stop()
 
 st.set_page_config(
     page_title="Football Analytics - Login",
