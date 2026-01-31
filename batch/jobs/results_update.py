@@ -53,6 +53,9 @@ class ResultsUpdateJob:
             updated_count = self._update_match_results(recent_results)
             logger.info(f"Updated {updated_count} match results")
 
+            # Flush to make status changes visible to subsequent queries
+            self.session.flush()
+
             # 3. Fetch xG data for finished matches
             xg_updated = asyncio.run(self._update_xg_data())
             logger.info(f"Updated xG for {xg_updated} matches")
