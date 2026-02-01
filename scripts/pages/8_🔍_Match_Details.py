@@ -144,7 +144,7 @@ except (ValueError, TypeError):
 
 # Load match data
 @st.cache_data(ttl=60)
-def load_match_details(mid: int, _cache_version: int = 2):  # v2: Added Dixon-Coles & Pi Rating
+def load_match_details(mid: int, _cache_version: int = 3):  # v3: Convert analysis to dict for proper caching
     with SyncSessionLocal() as session:
         match = session.execute(
             select(Match).where(Match.id == mid)
@@ -153,9 +153,36 @@ def load_match_details(mid: int, _cache_version: int = 2):  # v2: Added Dixon-Co
         if not match:
             return None
 
-        analysis = session.execute(
+        analysis_obj = session.execute(
             select(MatchAnalysis).where(MatchAnalysis.match_id == mid)
         ).scalar_one_or_none()
+
+        # Convert to dict for proper caching (SQLAlchemy objects don't serialize well)
+        analysis = None
+        if analysis_obj:
+            analysis = {
+                "elo_home_prob": analysis_obj.elo_home_prob,
+                "elo_draw_prob": analysis_obj.elo_draw_prob,
+                "elo_away_prob": analysis_obj.elo_away_prob,
+                "poisson_home_prob": analysis_obj.poisson_home_prob,
+                "poisson_draw_prob": analysis_obj.poisson_draw_prob,
+                "poisson_away_prob": analysis_obj.poisson_away_prob,
+                "dixon_coles_home_prob": getattr(analysis_obj, 'dixon_coles_home_prob', None),
+                "dixon_coles_draw_prob": getattr(analysis_obj, 'dixon_coles_draw_prob', None),
+                "dixon_coles_away_prob": getattr(analysis_obj, 'dixon_coles_away_prob', None),
+                "pi_rating_home_prob": getattr(analysis_obj, 'pi_rating_home_prob', None),
+                "pi_rating_draw_prob": getattr(analysis_obj, 'pi_rating_draw_prob', None),
+                "pi_rating_away_prob": getattr(analysis_obj, 'pi_rating_away_prob', None),
+                "xgboost_home_prob": analysis_obj.xgboost_home_prob,
+                "xgboost_draw_prob": analysis_obj.xgboost_draw_prob,
+                "xgboost_away_prob": analysis_obj.xgboost_away_prob,
+                "consensus_home_prob": analysis_obj.consensus_home_prob,
+                "consensus_draw_prob": analysis_obj.consensus_draw_prob,
+                "consensus_away_prob": analysis_obj.consensus_away_prob,
+                "predicted_home_goals": analysis_obj.predicted_home_goals,
+                "predicted_away_goals": analysis_obj.predicted_away_goals,
+                "narrative": analysis_obj.narrative,
+            }
 
         odds = session.execute(
             select(OddsHistory)
@@ -285,13 +312,13 @@ else:
     sub_text = match.kickoff_time.strftime("%a %d %b, %H:%M")
 
 # xG values
-home_xg = f"{float(analysis.predicted_home_goals):.1f}" if analysis and analysis.predicted_home_goals else ""
-away_xg = f"{float(analysis.predicted_away_goals):.1f}" if analysis and analysis.predicted_away_goals else ""
+home_xg = f"{float(analysis['predicted_home_goals']):.1f}" if analysis and analysis.get('predicted_home_goals') else ""
+away_xg = f"{float(analysis['predicted_away_goals']):.1f}" if analysis and analysis.get('predicted_away_goals') else ""
 
 # Consensus probabilities
-home_prob = float(analysis.consensus_home_prob) * 100 if analysis and analysis.consensus_home_prob else 0
-draw_prob = float(analysis.consensus_draw_prob) * 100 if analysis and analysis.consensus_draw_prob else 0
-away_prob = float(analysis.consensus_away_prob) * 100 if analysis and analysis.consensus_away_prob else 0
+home_prob = float(analysis['consensus_home_prob']) * 100 if analysis and analysis.get('consensus_home_prob') else 0
+draw_prob = float(analysis['consensus_draw_prob']) * 100 if analysis and analysis.get('consensus_draw_prob') else 0
+away_prob = float(analysis['consensus_away_prob']) * 100 if analysis and analysis.get('consensus_away_prob') else 0
 has_probs = home_prob > 0 or draw_prob > 0 or away_prob > 0
 
 # Pure HTML header with row-based alignment
@@ -597,9 +624,9 @@ st.divider()
 
 
 # --- AI Analysis ---
-if analysis and analysis.narrative:
+if analysis and analysis.get('narrative'):
     st.subheader("🤖 AI Analysis")
-    st.markdown(analysis.narrative)
+    st.markdown(analysis['narrative'])
     st.divider()
 
 
@@ -609,54 +636,52 @@ st.subheader("📊 Predictions")
 col1, col2 = st.columns(2)
 
 with col1:
-    if analysis and analysis.consensus_home_prob:
+    if analysis and analysis.get('consensus_home_prob'):
         st.markdown("**Model Probabilities**")
 
         pred_data = []
-        if analysis.elo_home_prob:
+        if analysis.get('elo_home_prob'):
             pred_data.append({
                 "Model": "ELO Rating",
-                "Home": f"{float(analysis.elo_home_prob):.0%}",
-                "Draw": f"{float(analysis.elo_draw_prob):.0%}",
-                "Away": f"{float(analysis.elo_away_prob):.0%}"
+                "Home": f"{float(analysis['elo_home_prob']):.0%}",
+                "Draw": f"{float(analysis['elo_draw_prob']):.0%}",
+                "Away": f"{float(analysis['elo_away_prob']):.0%}"
             })
-        if analysis.poisson_home_prob:
+        if analysis.get('poisson_home_prob'):
             pred_data.append({
                 "Model": "Poisson",
-                "Home": f"{float(analysis.poisson_home_prob):.0%}",
-                "Draw": f"{float(analysis.poisson_draw_prob):.0%}",
-                "Away": f"{float(analysis.poisson_away_prob):.0%}"
+                "Home": f"{float(analysis['poisson_home_prob']):.0%}",
+                "Draw": f"{float(analysis['poisson_draw_prob']):.0%}",
+                "Away": f"{float(analysis['poisson_away_prob']):.0%}"
             })
         # Dixon-Coles model (improved Poisson with goal correlation)
-        dc_home = getattr(analysis, 'dixon_coles_home_prob', None)
-        if dc_home:
+        if analysis.get('dixon_coles_home_prob'):
             pred_data.append({
                 "Model": "Dixon-Coles",
-                "Home": f"{float(dc_home):.0%}",
-                "Draw": f"{float(analysis.dixon_coles_draw_prob):.0%}",
-                "Away": f"{float(analysis.dixon_coles_away_prob):.0%}"
+                "Home": f"{float(analysis['dixon_coles_home_prob']):.0%}",
+                "Draw": f"{float(analysis['dixon_coles_draw_prob']):.0%}",
+                "Away": f"{float(analysis['dixon_coles_away_prob']):.0%}"
             })
         # Pi Rating model
-        pi_home = getattr(analysis, 'pi_rating_home_prob', None)
-        if pi_home:
+        if analysis.get('pi_rating_home_prob'):
             pred_data.append({
                 "Model": "Pi Rating",
-                "Home": f"{float(pi_home):.0%}",
-                "Draw": f"{float(analysis.pi_rating_draw_prob):.0%}",
-                "Away": f"{float(analysis.pi_rating_away_prob):.0%}"
+                "Home": f"{float(analysis['pi_rating_home_prob']):.0%}",
+                "Draw": f"{float(analysis['pi_rating_draw_prob']):.0%}",
+                "Away": f"{float(analysis['pi_rating_away_prob']):.0%}"
             })
-        if analysis.xgboost_home_prob:
+        if analysis.get('xgboost_home_prob'):
             pred_data.append({
                 "Model": "XGBoost",
-                "Home": f"{float(analysis.xgboost_home_prob):.0%}",
-                "Draw": f"{float(analysis.xgboost_draw_prob):.0%}",
-                "Away": f"{float(analysis.xgboost_away_prob):.0%}"
+                "Home": f"{float(analysis['xgboost_home_prob']):.0%}",
+                "Draw": f"{float(analysis['xgboost_draw_prob']):.0%}",
+                "Away": f"{float(analysis['xgboost_away_prob']):.0%}"
             })
         pred_data.append({
             "Model": "**Consensus**",
-            "Home": f"**{float(analysis.consensus_home_prob):.0%}**",
-            "Draw": f"**{float(analysis.consensus_draw_prob):.0%}**",
-            "Away": f"**{float(analysis.consensus_away_prob):.0%}**"
+            "Home": f"**{float(analysis['consensus_home_prob']):.0%}**",
+            "Draw": f"**{float(analysis['consensus_draw_prob']):.0%}**",
+            "Away": f"**{float(analysis['consensus_away_prob']):.0%}**"
         })
 
         st.dataframe(pred_data, use_container_width=True, hide_index=True)
@@ -679,11 +704,11 @@ with col2:
         st.info("No odds available for this match")
 
 # Edge comparison - below the columns
-if odds and analysis and analysis.consensus_home_prob:
+if odds and analysis and analysis.get('consensus_home_prob'):
     h, d, a = float(odds.home_odds), float(odds.draw_odds), float(odds.away_odds)
-    home_edge = float(analysis.consensus_home_prob) - (1/h)
-    draw_edge = float(analysis.consensus_draw_prob) - (1/d)
-    away_edge = float(analysis.consensus_away_prob) - (1/a)
+    home_edge = float(analysis['consensus_home_prob']) - (1/h)
+    draw_edge = float(analysis['consensus_draw_prob']) - (1/d)
+    away_edge = float(analysis['consensus_away_prob']) - (1/a)
 
     st.markdown(f"""
     <div class='edge-section'>
