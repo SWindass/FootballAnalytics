@@ -38,14 +38,9 @@ show_user_info()
 
 @st.cache_data(ttl=60)
 def load_teams():
-    try:
-        with SyncSessionLocal() as session:
-            teams = list(session.execute(select(Team)).scalars().all())
-            return {t.id: {"name": t.name, "short_name": t.short_name, "crest_url": t.crest_url} for t in teams}
-    except Exception as e:
-        st.error(f"Database error: {type(e).__name__}: {e}")
-        st.info(f"DB URL: {settings.database_url_sync[:50]}...")
-        raise
+    with SyncSessionLocal() as session:
+        teams = list(session.execute(select(Team)).scalars().all())
+        return {t.id: {"name": t.name, "short_name": t.short_name, "crest_url": t.crest_url} for t in teams}
 
 
 @st.cache_data(ttl=60)
@@ -227,7 +222,7 @@ with st.sidebar:
 
     # Version at bottom of sidebar
     st.markdown("---")
-    st.caption("v1.0.1")
+    st.caption("v1.0.2")
 
 
 # --- Load fixtures for selected matchweek ---

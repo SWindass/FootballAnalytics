@@ -615,7 +615,7 @@ with col1:
         pred_data = []
         if analysis.elo_home_prob:
             pred_data.append({
-                "Model": "ELO",
+                "Model": "ELO Rating",
                 "Home": f"{float(analysis.elo_home_prob):.0%}",
                 "Draw": f"{float(analysis.elo_draw_prob):.0%}",
                 "Away": f"{float(analysis.elo_away_prob):.0%}"
@@ -626,6 +626,22 @@ with col1:
                 "Home": f"{float(analysis.poisson_home_prob):.0%}",
                 "Draw": f"{float(analysis.poisson_draw_prob):.0%}",
                 "Away": f"{float(analysis.poisson_away_prob):.0%}"
+            })
+        # Dixon-Coles model (improved Poisson with goal correlation)
+        if hasattr(analysis, 'dixon_coles_home_prob') and analysis.dixon_coles_home_prob:
+            pred_data.append({
+                "Model": "Dixon-Coles",
+                "Home": f"{float(analysis.dixon_coles_home_prob):.0%}",
+                "Draw": f"{float(analysis.dixon_coles_draw_prob):.0%}",
+                "Away": f"{float(analysis.dixon_coles_away_prob):.0%}"
+            })
+        # Pi Rating model
+        if hasattr(analysis, 'pi_rating_home_prob') and analysis.pi_rating_home_prob:
+            pred_data.append({
+                "Model": "Pi Rating",
+                "Home": f"{float(analysis.pi_rating_home_prob):.0%}",
+                "Draw": f"{float(analysis.pi_rating_draw_prob):.0%}",
+                "Away": f"{float(analysis.pi_rating_away_prob):.0%}"
             })
         if analysis.xgboost_home_prob:
             pred_data.append({

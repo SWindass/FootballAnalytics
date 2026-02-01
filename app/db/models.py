@@ -368,6 +368,16 @@ class MatchAnalysis(Base):
     xgboost_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     xgboost_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
+    # Dixon-Coles model (Poisson with goal correlation)
+    dixon_coles_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    dixon_coles_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    dixon_coles_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+
+    # Pi Rating model
+    pi_rating_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    pi_rating_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    pi_rating_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+
     # Consensus predictions (weighted average)
     consensus_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     consensus_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
