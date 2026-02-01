@@ -144,7 +144,7 @@ except (ValueError, TypeError):
 
 # Load match data
 @st.cache_data(ttl=60)
-def load_match_details(mid: int):
+def load_match_details(mid: int, _cache_version: int = 2):  # v2: Added Dixon-Coles & Pi Rating
     with SyncSessionLocal() as session:
         match = session.execute(
             select(Match).where(Match.id == mid)
