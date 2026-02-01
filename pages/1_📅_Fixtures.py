@@ -220,6 +220,10 @@ with st.sidebar:
     st.caption("**Legend**")
     st.caption("🟢 Win  🟡 Draw  🔴 Loss")
 
+    # Version at bottom of sidebar
+    st.markdown("---")
+    st.caption("v1.0.1")
+
 
 # --- Load fixtures for selected matchweek ---
 
