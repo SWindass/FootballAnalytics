@@ -95,3 +95,4 @@ backup.sql
 ngrok
 ngrok-*.tgz
 
+.env.neon

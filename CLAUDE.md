@@ -165,6 +165,48 @@ PYTHONPATH=/home/steve/code/FootballAnalytics streamlit run scripts/Home.py --se
 
 **Note:** The `.env` uses `host.docker.internal` for database connections - this is required for WSL2 to connect to Docker Desktop containers.
 
+## Database Configuration
+
+This project uses **two PostgreSQL databases** that must be kept in sync:
+
+| Database | Purpose | Connection |
+|----------|---------|------------|
+| **Local (Docker)** | Development & testing | `host.docker.internal:5432` |
+| **Neon (Remote)** | Production (Streamlit Cloud) | `ep-weathered-flower-abk2q9k9.eu-west-2.aws.neon.tech` |
+
+### Environment Files
+
+- `.env` - Local Docker database (default for development)
+- `.env.neon` - Neon production database credentials (git-ignored)
+
+### Keeping Databases in Sync
+
+When running batch jobs that modify data (backfill, odds refresh, etc.), run against **BOTH** databases:
+
+```bash
+# 1. Run against local database (default)
+PYTHONPATH=/home/steve/code/FootballAnalytics python3 batch/jobs/backfill_value_bets.py --force
+
+# 2. Run against Neon database
+source .env.neon
+PYTHONPATH=/home/steve/code/FootballAnalytics python3 batch/jobs/backfill_value_bets.py --force
+```
+
+Or use this helper pattern:
+```bash
+# Run a command against Neon
+export DATABASE_URL_SYNC="$(grep DATABASE_URL_SYNC .env.neon | cut -d= -f2-)"
+python3 batch/jobs/backfill_value_bets.py --force
+```
+
+### Critical Jobs to Sync
+
+These jobs modify database state and should be run on both databases:
+- `batch/jobs/backfill_value_bets.py` - Regenerates historical value bets
+- `batch/jobs/results_update.py` - Updates match scores
+- `batch/jobs/odds_refresh.py` - Captures live odds
+- `batch/jobs/weekly_analysis.py` - Generates predictions
+
 ## Other Commands
 
 ```bash
