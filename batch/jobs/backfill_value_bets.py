@@ -162,10 +162,14 @@ class ValueBetBackfill:
             return 0, 0
 
         # If force, delete existing value bets for this season
+        # Only delete the outcomes we're regenerating (away_win, home_win)
+        # Preserve other outcomes like over_2_5 from odds_refresh
         if force:
             match_ids = [m.id for m, _ in matches]
             self.session.execute(
-                delete(ValueBet).where(ValueBet.match_id.in_(match_ids))
+                delete(ValueBet)
+                .where(ValueBet.match_id.in_(match_ids))
+                .where(ValueBet.outcome.in_(["away_win", "home_win"]))
             )
             self.session.flush()
 
