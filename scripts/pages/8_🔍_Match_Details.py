@@ -1,9 +1,15 @@
 """Match Details Page - Shows full analysis for a single match."""
 import sys
 from pathlib import Path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
+scripts_dir = str(project_root / "scripts")
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
+
+# Initialize database with Streamlit secrets BEFORE other imports
+import db_init  # noqa: F401
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -138,7 +144,7 @@ except (ValueError, TypeError):
 
 # Load match data
 @st.cache_data(ttl=60)
-def load_match_details(mid: int):
+def load_match_details(mid: int, _cache_version: int = 2):  # v2: Added Dixon-Coles & Pi Rating
     with SyncSessionLocal() as session:
         match = session.execute(
             select(Match).where(Match.id == mid)
@@ -609,7 +615,7 @@ with col1:
         pred_data = []
         if analysis.elo_home_prob:
             pred_data.append({
-                "Model": "ELO",
+                "Model": "ELO Rating",
                 "Home": f"{float(analysis.elo_home_prob):.0%}",
                 "Draw": f"{float(analysis.elo_draw_prob):.0%}",
                 "Away": f"{float(analysis.elo_away_prob):.0%}"
@@ -620,6 +626,22 @@ with col1:
                 "Home": f"{float(analysis.poisson_home_prob):.0%}",
                 "Draw": f"{float(analysis.poisson_draw_prob):.0%}",
                 "Away": f"{float(analysis.poisson_away_prob):.0%}"
+            })
+        # Dixon-Coles model (improved Poisson with goal correlation)
+        if hasattr(analysis, 'dixon_coles_home_prob') and analysis.dixon_coles_home_prob:
+            pred_data.append({
+                "Model": "Dixon-Coles",
+                "Home": f"{float(analysis.dixon_coles_home_prob):.0%}",
+                "Draw": f"{float(analysis.dixon_coles_draw_prob):.0%}",
+                "Away": f"{float(analysis.dixon_coles_away_prob):.0%}"
+            })
+        # Pi Rating model
+        if hasattr(analysis, 'pi_rating_home_prob') and analysis.pi_rating_home_prob:
+            pred_data.append({
+                "Model": "Pi Rating",
+                "Home": f"{float(analysis.pi_rating_home_prob):.0%}",
+                "Draw": f"{float(analysis.pi_rating_draw_prob):.0%}",
+                "Away": f"{float(analysis.pi_rating_away_prob):.0%}"
             })
         if analysis.xgboost_home_prob:
             pred_data.append({

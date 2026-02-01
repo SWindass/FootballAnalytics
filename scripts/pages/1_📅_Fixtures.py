@@ -1,9 +1,15 @@
 """Upcoming fixtures dashboard with predictions and value bets."""
 import sys
 from pathlib import Path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
+scripts_dir = str(project_root / "scripts")
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
+
+# Initialize database with Streamlit secrets BEFORE other imports
+import db_init  # noqa: F401
 
 import streamlit as st
 from datetime import datetime, timedelta, timezone
@@ -13,7 +19,7 @@ from itertools import groupby
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus, Team, TeamStats, OddsHistory, ValueBet
 from app.core.config import get_settings
-from auth import require_auth, show_user_info
+from auth import require_auth, show_user_info, get_current_user
 from pwa import inject_pwa_tags
 
 settings = get_settings()
@@ -178,8 +184,6 @@ current_mw = get_current_matchweek()
 
 # --- Sidebar ---
 
-APP_VERSION = "1.0.0"
-
 with st.sidebar:
     st.subheader("Matchweek")
 
@@ -194,13 +198,31 @@ with st.sidebar:
     else:
         selected_mw = current_mw
 
+    # Admin-only: Update Scores button
+    user = get_current_user()
+    if user and user.get("role") == "admin":
+        st.divider()
+        if st.button("🔄 Update Scores", use_container_width=True):
+            with st.spinner("Updating scores..."):
+                try:
+                    from batch.jobs.results_update import run_results_update
+                    result = run_results_update()
+                    st.success(f"Updated {result['matches_updated']} matches")
+                    if result.get('bets_resolved', 0) > 0:
+                        st.info(f"Resolved {result['bets_resolved']} value bets")
+                    # Clear cached data to show fresh results
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Update failed: {e}")
+
     st.divider()
     st.caption("**Legend**")
     st.caption("🟢 Win  🟡 Draw  🔴 Loss")
 
     # Version at bottom of sidebar
     st.markdown("---")
-    st.caption(f"v{APP_VERSION}")
+    st.caption("v1.0.3")
 
 
 # --- Load fixtures for selected matchweek ---
@@ -243,9 +265,19 @@ st.markdown("""
     min-height: 44px !important;
     width: 100% !important;
     display: flex !important;
-    justify-content: center !important;
     align-items: center !important;
-    text-align: center !important;
+}
+
+/* Home team - right aligned */
+[data-testid="stHorizontalBlock"] > div:nth-child(1) button {
+    justify-content: flex-end !important;
+    text-align: right !important;
+}
+
+/* Away team - left aligned */
+[data-testid="stHorizontalBlock"] > div:nth-child(5) button {
+    justify-content: flex-start !important;
+    text-align: left !important;
 }
 [data-testid="stHorizontalBlock"] button:hover {
     background: transparent !important;
