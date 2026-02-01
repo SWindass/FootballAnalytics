@@ -643,11 +643,26 @@ st.subheader("📊 Predictions")
 
 # Debug: show what's in analysis
 with st.expander("🔧 Debug: Analysis Data", expanded=False):
+    st.write(f"Match ID: {match_id}")
     if analysis:
+        st.write(f"ELO (should work): {analysis.get('elo_home_prob')}")
         st.write(f"Dixon-Coles: {analysis.get('dixon_coles_home_prob')}")
         st.write(f"Pi Rating: {analysis.get('pi_rating_home_prob')}")
     else:
-        st.write("No analysis data")
+        st.write("No analysis data loaded")
+
+    # Direct DB query (bypasses all caching)
+    st.write("--- Direct DB Query ---")
+    from sqlalchemy import text
+    with SyncSessionLocal() as test_session:
+        test_row = test_session.execute(text("""
+            SELECT dixon_coles_home_prob, pi_rating_home_prob
+            FROM match_analyses WHERE match_id = :mid
+        """), {"mid": match_id}).fetchone()
+        if test_row:
+            st.write(f"Direct DB - Dixon-Coles: {test_row[0]}, Pi: {test_row[1]}")
+        else:
+            st.write("No row found in direct query")
 
 col1, col2 = st.columns(2)
 
