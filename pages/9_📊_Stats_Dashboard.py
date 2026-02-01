@@ -245,22 +245,42 @@ def calculate_model_metrics(df, model_prefix, season_filter=None):
     if home_col not in df.columns or df[home_col].isna().all():
         return None
 
-    # Get predicted result (highest probability)
+    # Get predicted result (highest probability) and confidence
     def get_predicted(row):
         probs = {
             'home': row[home_col] if pd.notna(row[home_col]) else 0,
             'draw': row[draw_col] if pd.notna(row[draw_col]) else 0,
             'away': row[away_col] if pd.notna(row[away_col]) else 0
         }
-        return max(probs, key=probs.get)
+        pred = max(probs, key=probs.get)
+        conf = probs[pred]
+        return pred, conf
 
     df = df.copy()
-    df['predicted'] = df.apply(get_predicted, axis=1)
+    df[['predicted', 'confidence']] = df.apply(lambda row: pd.Series(get_predicted(row)), axis=1)
 
     # Overall accuracy
     correct = (df['predicted'] == df['actual_result']).sum()
     total = len(df)
     accuracy = correct / total if total > 0 else 0
+
+    # Accuracy EXCLUDING draws (decisive matches only)
+    decisive_df = df[df['actual_result'] != 'draw']
+    decisive_correct = (decisive_df['predicted'] == decisive_df['actual_result']).sum()
+    decisive_total = len(decisive_df)
+    decisive_accuracy = decisive_correct / decisive_total if decisive_total > 0 else 0
+
+    # High confidence accuracy (when model confidence >= 50%)
+    high_conf_df = df[df['confidence'] >= 0.50]
+    high_conf_correct = (high_conf_df['predicted'] == high_conf_df['actual_result']).sum()
+    high_conf_total = len(high_conf_df)
+    high_conf_accuracy = high_conf_correct / high_conf_total if high_conf_total > 0 else 0
+
+    # Very high confidence (>= 55%)
+    very_high_conf_df = df[df['confidence'] >= 0.55]
+    very_high_conf_correct = (very_high_conf_df['predicted'] == very_high_conf_df['actual_result']).sum()
+    very_high_conf_total = len(very_high_conf_df)
+    very_high_conf_accuracy = very_high_conf_correct / very_high_conf_total if very_high_conf_total > 0 else 0
 
     # Accuracy by outcome
     home_matches = df[df['actual_result'] == 'home']
@@ -308,7 +328,13 @@ def calculate_model_metrics(df, model_prefix, season_filter=None):
 
     return {
         'accuracy': accuracy,
+        'decisive_accuracy': decisive_accuracy,
+        'high_conf_accuracy': high_conf_accuracy,
+        'very_high_conf_accuracy': very_high_conf_accuracy,
         'total': total,
+        'decisive_total': decisive_total,
+        'high_conf_total': high_conf_total,
+        'very_high_conf_total': very_high_conf_total,
         'correct': correct,
         'home_accuracy': home_acc,
         'draw_accuracy': draw_acc,
@@ -454,34 +480,80 @@ for model in model_options:
 if 'consensus' in model_metrics:
     metrics = model_metrics['consensus']
 
+    # Key insight callout
+    st.info(f"""
+    **Key Metrics Explained:**
+    - **Decisive Matches** = Home/Away wins only (excludes draws which are ~25% of matches but <10% predictable)
+    - **High Confidence** = When model predicts >50% for an outcome
+    - Draws drag down overall accuracy significantly but don't affect betting edge detection
+    """)
+
+    # Primary metrics - the ones that matter most
+    st.markdown("##### Primary Performance Metrics")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            "Decisive Match Accuracy",
+            f"{metrics['decisive_accuracy']:.1%}",
+            delta=f"{metrics['decisive_total']:,} matches",
+            help="Accuracy on Home/Away wins only (excludes unpredictable draws)"
+        )
+
+    with col2:
+        st.metric(
+            "High Confidence (≥50%)",
+            f"{metrics['high_conf_accuracy']:.1%}",
+            delta=f"{metrics['high_conf_total']:,} matches",
+            help="Accuracy when model is confident (≥50% probability)"
+        )
+
+    with col3:
+        st.metric(
+            "Very High Conf (≥55%)",
+            f"{metrics['very_high_conf_accuracy']:.1%}",
+            delta=f"{metrics['very_high_conf_total']:,} matches",
+            help="Accuracy when model is very confident (≥55% probability)"
+        )
+
+    with col4:
+        st.metric(
+            "Brier Score",
+            f"{metrics['brier_score']:.4f}",
+            help="Lower is better. Perfect=0, Random=0.67, Market~0.55"
+        )
+
+    # Secondary metrics
+    st.markdown("##### All Matches (Including Draws)")
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric(
             "Overall Accuracy",
             f"{metrics['accuracy']:.1%}",
-            help="Percentage of correct predictions"
+            help="All matches including draws (draws are ~25% of matches but rarely predicted)"
         )
 
     with col2:
         st.metric(
-            "Brier Score",
-            f"{metrics['brier_score']:.4f}",
-            help="Lower is better. Perfect = 0, Random = 0.67"
+            "Log Loss",
+            f"{metrics['log_loss']:.4f}",
+            help="Lower is better. Measures probability calibration"
         )
 
     with col3:
         st.metric(
-            "Log Loss",
-            f"{metrics['log_loss']:.4f}",
-            help="Lower is better. Measures prediction confidence"
+            "Total Matches",
+            f"{metrics['total']:,}",
+            help="Total finished matches analyzed"
         )
 
     with col4:
+        draw_pct = (metrics['total'] - metrics['decisive_total']) / metrics['total'] * 100
         st.metric(
-            "Predictions",
-            f"{metrics['total']:,}",
-            help="Total finished matches analyzed"
+            "Draw %",
+            f"{draw_pct:.0f}%",
+            help="Percentage of matches that were draws"
         )
 
     # Accuracy by outcome
@@ -513,43 +585,36 @@ comparison_data = []
 for model, metrics in model_metrics.items():
     comparison_data.append({
         'Model': model_names.get(model, model),
-        'Accuracy': metrics['accuracy'],
+        'Decisive Acc': metrics['decisive_accuracy'],
+        'High Conf Acc': metrics['high_conf_accuracy'],
         'Brier Score': metrics['brier_score'],
-        'Log Loss': metrics['log_loss'],
+        'Overall Acc': metrics['accuracy'],
         'Home Acc': metrics['home_accuracy'],
-        'Draw Acc': metrics['draw_accuracy'],
         'Away Acc': metrics['away_accuracy'],
-        'Matches': metrics['total']
+        'Draw Acc': metrics['draw_accuracy'],
     })
 
 if comparison_data:
     comp_df = pd.DataFrame(comparison_data)
 
     # Find best values
-    best_acc = comp_df['Accuracy'].max()
+    best_decisive = comp_df['Decisive Acc'].max()
+    best_high_conf = comp_df['High Conf Acc'].max()
     best_brier = comp_df['Brier Score'].min()
-    best_logloss = comp_df['Log Loss'].min()
-
-    # Style the dataframe
-    def highlight_best(val, col):
-        if col == 'Accuracy' and val == best_acc:
-            return 'background-color: rgba(0, 255, 136, 0.3)'
-        elif col == 'Brier Score' and val == best_brier:
-            return 'background-color: rgba(0, 255, 136, 0.3)'
-        elif col == 'Log Loss' and val == best_logloss:
-            return 'background-color: rgba(0, 255, 136, 0.3)'
-        return ''
 
     # Format display
     comp_df_display = comp_df.copy()
-    comp_df_display['Accuracy'] = comp_df_display['Accuracy'].apply(lambda x: f"{x:.1%}")
+    comp_df_display['Decisive Acc'] = comp_df_display['Decisive Acc'].apply(lambda x: f"{x:.1%}")
+    comp_df_display['High Conf Acc'] = comp_df_display['High Conf Acc'].apply(lambda x: f"{x:.1%}")
     comp_df_display['Brier Score'] = comp_df_display['Brier Score'].apply(lambda x: f"{x:.4f}")
-    comp_df_display['Log Loss'] = comp_df_display['Log Loss'].apply(lambda x: f"{x:.4f}")
+    comp_df_display['Overall Acc'] = comp_df_display['Overall Acc'].apply(lambda x: f"{x:.1%}")
     comp_df_display['Home Acc'] = comp_df_display['Home Acc'].apply(lambda x: f"{x:.1%}")
-    comp_df_display['Draw Acc'] = comp_df_display['Draw Acc'].apply(lambda x: f"{x:.1%}")
     comp_df_display['Away Acc'] = comp_df_display['Away Acc'].apply(lambda x: f"{x:.1%}")
+    comp_df_display['Draw Acc'] = comp_df_display['Draw Acc'].apply(lambda x: f"{x:.1%}")
 
     st.dataframe(comp_df_display, use_container_width=True, hide_index=True)
+
+    st.caption("**Decisive Acc** = Home/Away wins only | **High Conf Acc** = When model predicts ≥50%")
 
 
 # --- PART 3: Performance Over Time ---
