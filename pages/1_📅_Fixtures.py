@@ -222,7 +222,7 @@ with st.sidebar:
 
     # Version at bottom of sidebar
     st.markdown("---")
-    st.caption("v1.0.4")
+    st.caption("v1.0.5")
 
 
 # --- Load fixtures for selected matchweek ---

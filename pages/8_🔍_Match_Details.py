@@ -144,7 +144,7 @@ except (ValueError, TypeError):
 
 # Load match data
 @st.cache_data(ttl=60)
-def load_match_details(mid: int, _cache_version: int = 3):  # v3: Convert analysis to dict for proper caching
+def load_match_details(mid: int, _cache_version: int = 4):  # v4: Use raw SQL for new columns
     with SyncSessionLocal() as session:
         match = session.execute(
             select(Match).where(Match.id == mid)
@@ -153,35 +153,43 @@ def load_match_details(mid: int, _cache_version: int = 3):  # v3: Convert analys
         if not match:
             return None
 
-        analysis_obj = session.execute(
-            select(MatchAnalysis).where(MatchAnalysis.match_id == mid)
-        ).scalar_one_or_none()
+        # Use raw SQL to get all columns including new ones (bypasses ORM caching)
+        from sqlalchemy import text
+        analysis_row = session.execute(text("""
+            SELECT elo_home_prob, elo_draw_prob, elo_away_prob,
+                   poisson_home_prob, poisson_draw_prob, poisson_away_prob,
+                   dixon_coles_home_prob, dixon_coles_draw_prob, dixon_coles_away_prob,
+                   pi_rating_home_prob, pi_rating_draw_prob, pi_rating_away_prob,
+                   xgboost_home_prob, xgboost_draw_prob, xgboost_away_prob,
+                   consensus_home_prob, consensus_draw_prob, consensus_away_prob,
+                   predicted_home_goals, predicted_away_goals, narrative
+            FROM match_analyses WHERE match_id = :mid
+        """), {"mid": mid}).fetchone()
 
-        # Convert to dict for proper caching (SQLAlchemy objects don't serialize well)
         analysis = None
-        if analysis_obj:
+        if analysis_row:
             analysis = {
-                "elo_home_prob": analysis_obj.elo_home_prob,
-                "elo_draw_prob": analysis_obj.elo_draw_prob,
-                "elo_away_prob": analysis_obj.elo_away_prob,
-                "poisson_home_prob": analysis_obj.poisson_home_prob,
-                "poisson_draw_prob": analysis_obj.poisson_draw_prob,
-                "poisson_away_prob": analysis_obj.poisson_away_prob,
-                "dixon_coles_home_prob": getattr(analysis_obj, 'dixon_coles_home_prob', None),
-                "dixon_coles_draw_prob": getattr(analysis_obj, 'dixon_coles_draw_prob', None),
-                "dixon_coles_away_prob": getattr(analysis_obj, 'dixon_coles_away_prob', None),
-                "pi_rating_home_prob": getattr(analysis_obj, 'pi_rating_home_prob', None),
-                "pi_rating_draw_prob": getattr(analysis_obj, 'pi_rating_draw_prob', None),
-                "pi_rating_away_prob": getattr(analysis_obj, 'pi_rating_away_prob', None),
-                "xgboost_home_prob": analysis_obj.xgboost_home_prob,
-                "xgboost_draw_prob": analysis_obj.xgboost_draw_prob,
-                "xgboost_away_prob": analysis_obj.xgboost_away_prob,
-                "consensus_home_prob": analysis_obj.consensus_home_prob,
-                "consensus_draw_prob": analysis_obj.consensus_draw_prob,
-                "consensus_away_prob": analysis_obj.consensus_away_prob,
-                "predicted_home_goals": analysis_obj.predicted_home_goals,
-                "predicted_away_goals": analysis_obj.predicted_away_goals,
-                "narrative": analysis_obj.narrative,
+                "elo_home_prob": analysis_row[0],
+                "elo_draw_prob": analysis_row[1],
+                "elo_away_prob": analysis_row[2],
+                "poisson_home_prob": analysis_row[3],
+                "poisson_draw_prob": analysis_row[4],
+                "poisson_away_prob": analysis_row[5],
+                "dixon_coles_home_prob": analysis_row[6],
+                "dixon_coles_draw_prob": analysis_row[7],
+                "dixon_coles_away_prob": analysis_row[8],
+                "pi_rating_home_prob": analysis_row[9],
+                "pi_rating_draw_prob": analysis_row[10],
+                "pi_rating_away_prob": analysis_row[11],
+                "xgboost_home_prob": analysis_row[12],
+                "xgboost_draw_prob": analysis_row[13],
+                "xgboost_away_prob": analysis_row[14],
+                "consensus_home_prob": analysis_row[15],
+                "consensus_draw_prob": analysis_row[16],
+                "consensus_away_prob": analysis_row[17],
+                "predicted_home_goals": analysis_row[18],
+                "predicted_away_goals": analysis_row[19],
+                "narrative": analysis_row[20],
             }
 
         odds = session.execute(
