@@ -187,14 +187,24 @@ current_mw = get_current_matchweek()
 with st.sidebar:
     st.subheader("Matchweek")
 
+    # Get selected matchweek from session state or default to current
+    if "selected_matchweek" not in st.session_state:
+        st.session_state["selected_matchweek"] = current_mw
+
     if matchweeks:
+        # Find the index for the selectbox
+        default_idx = matchweeks.index(st.session_state["selected_matchweek"]) if st.session_state["selected_matchweek"] in matchweeks else (matchweeks.index(current_mw) if current_mw in matchweeks else 0)
+
         selected_mw = st.selectbox(
             "Select matchweek",
             matchweeks,
-            index=matchweeks.index(current_mw) if current_mw in matchweeks else 0,
+            index=default_idx,
             format_func=lambda x: f"MW {x}" + (" (current)" if x == current_mw else ""),
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="mw_selectbox"
         )
+        # Update session state when selectbox changes
+        st.session_state["selected_matchweek"] = selected_mw
     else:
         selected_mw = current_mw
 
@@ -222,7 +232,7 @@ with st.sidebar:
 
     # Version at bottom of sidebar
     st.markdown("---")
-    st.caption("v1.0.6")
+    st.caption("v1.1.0")
 
 
 # --- Load fixtures for selected matchweek ---
@@ -394,13 +404,51 @@ button[kind="primary"]:hover {
     color: #ffffff !important;
     border-color: #ffffff !important;
 }
+
+/* Navigation arrows styling */
+button[key*="prev_mw"], button[key*="next_mw"] {
+    background: rgba(255,255,255,0.1) !important;
+    border: 1px solid #444 !important;
+    border-radius: 8px !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    padding: 8px 16px !important;
+}
+button[key*="prev_mw"]:hover, button[key*="next_mw"]:hover {
+    background: rgba(255,255,255,0.2) !important;
+    border-color: #666 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
 # --- Main Content ---
 
-st.title(f"Matchweek {selected_mw}")
+# Matchweek navigation with arrows
+nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+
+with nav_col1:
+    # Previous matchweek button
+    if selected_mw > min(matchweeks):
+        if st.button("◀ Prev", key="prev_mw", use_container_width=True):
+            prev_idx = matchweeks.index(selected_mw) - 1
+            st.session_state["selected_matchweek"] = matchweeks[prev_idx]
+            st.rerun()
+    else:
+        st.write("")  # Empty placeholder
+
+with nav_col2:
+    st.markdown(f"<h1 style='text-align: center; margin: 0;'>Matchweek {selected_mw}</h1>", unsafe_allow_html=True)
+
+with nav_col3:
+    # Next matchweek button
+    if selected_mw < max(matchweeks):
+        if st.button("Next ▶", key="next_mw", use_container_width=True):
+            next_idx = matchweeks.index(selected_mw) + 1
+            st.session_state["selected_matchweek"] = matchweeks[next_idx]
+            st.rerun()
+    else:
+        st.write("")  # Empty placeholder
 
 # Group fixtures by date
 fixtures_by_date = {}
