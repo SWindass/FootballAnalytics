@@ -628,18 +628,20 @@ with col1:
                 "Away": f"{float(analysis.poisson_away_prob):.0%}"
             })
         # Dixon-Coles model (improved Poisson with goal correlation)
-        if hasattr(analysis, 'dixon_coles_home_prob') and analysis.dixon_coles_home_prob:
+        dc_home = getattr(analysis, 'dixon_coles_home_prob', None)
+        if dc_home:
             pred_data.append({
                 "Model": "Dixon-Coles",
-                "Home": f"{float(analysis.dixon_coles_home_prob):.0%}",
+                "Home": f"{float(dc_home):.0%}",
                 "Draw": f"{float(analysis.dixon_coles_draw_prob):.0%}",
                 "Away": f"{float(analysis.dixon_coles_away_prob):.0%}"
             })
         # Pi Rating model
-        if hasattr(analysis, 'pi_rating_home_prob') and analysis.pi_rating_home_prob:
+        pi_home = getattr(analysis, 'pi_rating_home_prob', None)
+        if pi_home:
             pred_data.append({
                 "Model": "Pi Rating",
-                "Home": f"{float(analysis.pi_rating_home_prob):.0%}",
+                "Home": f"{float(pi_home):.0%}",
                 "Draw": f"{float(analysis.pi_rating_draw_prob):.0%}",
                 "Away": f"{float(analysis.pi_rating_away_prob):.0%}"
             })
