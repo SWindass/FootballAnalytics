@@ -155,7 +155,8 @@ with tab1:
         fig.update_layout(
             title=f"Team Strengths - {selected_season}" + (f" (up to MW{selected_mw})" if selected_mw else ""),
             xaxis_title="Attack Strength (>1 = above league avg)",
-            yaxis_title="Defense Strength (>1 = concedes more)",
+            yaxis_title="Defense Strength (<1 = strong defense)",
+            yaxis_autorange="reversed",  # Strong defense (low values) at top
             height=600,
         )
 
