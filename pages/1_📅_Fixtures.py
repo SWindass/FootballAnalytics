@@ -99,7 +99,10 @@ def get_current_matchweek():
 
 @st.cache_data(ttl=60)
 def load_matchweek_fixtures(matchweek: int):
+    from sqlalchemy.orm import joinedload
+
     with SyncSessionLocal() as session:
+        # 1. Load all matches for matchweek
         stmt = (
             select(Match)
             .where(Match.season == settings.current_season)
@@ -108,30 +111,55 @@ def load_matchweek_fixtures(matchweek: int):
         )
         matches = list(session.execute(stmt).scalars().all())
 
+        if not matches:
+            return []
+
+        match_ids = [m.id for m in matches]
+
+        # 2. Batch load all analyses
+        analyses = list(session.execute(
+            select(MatchAnalysis).where(MatchAnalysis.match_id.in_(match_ids))
+        ).scalars().all())
+        analysis_by_match = {a.match_id: a for a in analyses}
+
+        # 3. Batch load latest odds per match (using subquery for latest)
+        from sqlalchemy import func
+        latest_odds_subq = (
+            select(OddsHistory.match_id, func.max(OddsHistory.recorded_at).label("max_time"))
+            .where(OddsHistory.match_id.in_(match_ids))
+            .group_by(OddsHistory.match_id)
+            .subquery()
+        )
+        odds_list = list(session.execute(
+            select(OddsHistory)
+            .join(latest_odds_subq,
+                  (OddsHistory.match_id == latest_odds_subq.c.match_id) &
+                  (OddsHistory.recorded_at == latest_odds_subq.c.max_time))
+        ).scalars().all())
+        odds_by_match = {o.match_id: o for o in odds_list}
+
+        # 4. Batch load all active value bets
+        value_bets_list = list(session.execute(
+            select(ValueBet)
+            .options(joinedload(ValueBet.strategy))
+            .where(ValueBet.match_id.in_(match_ids))
+            .where(ValueBet.is_active == True)
+        ).scalars().all())
+        vb_by_match = {}
+        for vb in value_bets_list:
+            if vb.match_id not in vb_by_match:
+                vb_by_match[vb.match_id] = []
+            vb_by_match[vb.match_id].append(vb)
+
+        # 5. Build fixtures list
         fixtures = []
         for match in matches:
-            analysis = session.execute(
-                select(MatchAnalysis).where(MatchAnalysis.match_id == match.id)
-            ).scalar_one_or_none()
-
-            odds = session.execute(
-                select(OddsHistory)
-                .where(OddsHistory.match_id == match.id)
-                .order_by(OddsHistory.recorded_at.desc())
-                .limit(1)
-            ).scalar_one_or_none()
-
-            from sqlalchemy.orm import joinedload
-            value_bets = list(session.execute(
-                select(ValueBet)
-                .options(joinedload(ValueBet.strategy))
-                .where(ValueBet.match_id == match.id)
-                .where(ValueBet.is_active == True)
-                .order_by(ValueBet.edge.desc())
-            ).scalars().all())
-
             status = match.status if hasattr(match.status, 'value') else match.status
             is_finished = status == MatchStatus.FINISHED if not isinstance(status, str) else status.upper() == "FINISHED"
+
+            # Sort value bets by edge descending
+            match_vbs = vb_by_match.get(match.id, [])
+            match_vbs.sort(key=lambda x: float(x.edge), reverse=True)
 
             fixtures.append({
                 "id": match.id,
@@ -143,9 +171,9 @@ def load_matchweek_fixtures(matchweek: int):
                 "home_score": match.home_score,
                 "away_score": match.away_score,
                 "is_finished": is_finished,
-                "analysis": analysis,
-                "odds": odds,
-                "value_bets": value_bets,
+                "analysis": analysis_by_match.get(match.id),
+                "odds": odds_by_match.get(match.id),
+                "value_bets": match_vbs,
             })
 
         return fixtures
