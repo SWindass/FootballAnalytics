@@ -9,10 +9,9 @@ Run with: PYTHONPATH=. python batch/jobs/backfill_team_stats.py
 import argparse
 from collections import defaultdict
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchStatus, Team, TeamStats
@@ -41,7 +40,7 @@ def compute_form_points(form: str) -> int:
 
 
 def backfill_team_stats(
-    season: Optional[str] = None,
+    season: str | None = None,
     dry_run: bool = False,
     clear_existing: bool = False,
 ) -> dict:
@@ -122,7 +121,7 @@ def backfill_team_stats(
             for mw in range(1, max_mw + 1):
                 # First, create TeamStats for all teams BEFORE processing this matchweek's results
                 # This represents the state going INTO this matchweek
-                for team_id, team in teams.items():
+                for team_id, _team in teams.items():
                     stats = team_cumulative[team_id]
 
                     # Skip if team has no matches yet this season

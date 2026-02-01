@@ -1,7 +1,6 @@
 """AI narrative generation using Claude API."""
 
-from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import anthropic
 import structlog
@@ -61,7 +60,7 @@ Keep the tone professional. Be honest about uncertainty - if models disagree, sa
 class NarrativeGenerator:
     """Generates AI match narratives using Claude API."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.anthropic_api_key
         self.client = anthropic.Anthropic(api_key=self.api_key) if self.api_key else None
 
@@ -71,10 +70,10 @@ class NarrativeGenerator:
         home_stats: dict[str, Any],
         away_stats: dict[str, Any],
         predictions: dict[str, float],
-        h2h_history: Optional[list[dict]] = None,
-        value_bets: Optional[list[dict]] = None,
-        odds: Optional[dict[str, float]] = None,
-        confidence_data: Optional[dict[str, Any]] = None,
+        h2h_history: list[dict] | None = None,
+        value_bets: list[dict] | None = None,
+        odds: dict[str, float] | None = None,
+        confidence_data: dict[str, Any] | None = None,
     ) -> str:
         """Generate a match preview narrative.
 
@@ -178,7 +177,7 @@ class NarrativeGenerator:
 
     def _format_confidence_analysis(
         self,
-        confidence_data: Optional[dict[str, Any]],
+        confidence_data: dict[str, Any] | None,
     ) -> str:
         """Format confidence analysis for the prompt.
 
@@ -253,8 +252,8 @@ class NarrativeGenerator:
     def _format_value_edge(
         self,
         predictions: dict[str, float],
-        odds: Optional[dict[str, float]],
-        value_bets: Optional[list[dict]],
+        odds: dict[str, float] | None,
+        value_bets: list[dict] | None,
     ) -> str:
         """Format value edge analysis for the prompt.
 

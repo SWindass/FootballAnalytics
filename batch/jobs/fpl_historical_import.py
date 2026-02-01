@@ -7,7 +7,6 @@ import asyncio
 import io
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import httpx
 import pandas as pd
@@ -82,7 +81,7 @@ FPL_TEAM_NAME_MAP = {
 class FPLHistoricalImporter:
     """Imports historical FPL data from GitHub."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self._team_cache: dict[str, int] = {}  # team name -> our team_id
         self._player_cache: dict[str, int] = {}  # "name_season" -> player_id
@@ -313,7 +312,7 @@ class FPLHistoricalImporter:
 
         return records_imported
 
-    def _get_or_create_player(self, name: str, row: dict, season: str) -> Optional[int]:
+    def _get_or_create_player(self, name: str, row: dict, season: str) -> int | None:
         """Get or create a player record."""
         cache_key = f"{name}_{season}"
 

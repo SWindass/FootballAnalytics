@@ -17,13 +17,10 @@ import csv
 import io
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
-from pathlib import Path
-from typing import Optional
 
 import httpx
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.database import SyncSessionLocal
@@ -44,7 +41,7 @@ def season_to_fd_format(season: str) -> str:
 def fd_season_to_our_format(fd_season: str) -> str:
     """Convert '2425' to '2024-25'."""
     year1 = int(fd_season[:2])
-    year2 = int(fd_season[2:])
+    int(fd_season[2:])
     # Handle century rollover
     if year1 > 90:
         full_year1 = 1900 + year1
@@ -69,18 +66,18 @@ class HistoricalOdds:
     avg_away_odds: float
 
     # Max odds
-    max_home_odds: Optional[float] = None
-    max_draw_odds: Optional[float] = None
-    max_away_odds: Optional[float] = None
+    max_home_odds: float | None = None
+    max_draw_odds: float | None = None
+    max_away_odds: float | None = None
 
     # Bet365 odds (most liquid bookmaker)
-    b365_home_odds: Optional[float] = None
-    b365_draw_odds: Optional[float] = None
-    b365_away_odds: Optional[float] = None
+    b365_home_odds: float | None = None
+    b365_draw_odds: float | None = None
+    b365_away_odds: float | None = None
 
     # Over/Under 2.5
-    avg_over_2_5_odds: Optional[float] = None
-    avg_under_2_5_odds: Optional[float] = None
+    avg_over_2_5_odds: float | None = None
+    avg_under_2_5_odds: float | None = None
 
     # Implied probabilities (calculated from average odds, normalized)
     implied_home_prob: float = 0.0
@@ -164,7 +161,7 @@ def normalize_team_name(name: str) -> str:
     return TEAM_MAPPING.get(name, name + " FC")
 
 
-def parse_float(value: str) -> Optional[float]:
+def parse_float(value: str) -> float | None:
     """Parse float from CSV, handling empty strings."""
     if not value or value.strip() == "":
         return None
@@ -511,7 +508,7 @@ if __name__ == "__main__":
         # Default: show sample
         print("Downloading sample from 2024-25 season...")
         odds = download_season_odds("2024-25")
-        print(f"\nSample odds (first 3 matches):")
+        print("\nSample odds (first 3 matches):")
         for o in odds[:3]:
             print(f"\n{o.date.strftime('%Y-%m-%d')} {o.home_team} vs {o.away_team}")
             print(f"  Result: {o.home_score}-{o.away_score} ({o.result})")

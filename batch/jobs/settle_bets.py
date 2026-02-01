@@ -7,12 +7,10 @@ Runs periodically to:
 4. Update bet records
 """
 
-from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
@@ -28,8 +26,8 @@ def determine_bet_result(
     outcome: str,
     home_score: int,
     away_score: int,
-    home_xg: Optional[Decimal] = None,
-    away_xg: Optional[Decimal] = None,
+    home_xg: Decimal | None = None,
+    away_xg: Decimal | None = None,
 ) -> str:
     """Determine if a bet won or lost based on match result.
 
@@ -96,7 +94,7 @@ def calculate_profit_loss(result: str, odds: Decimal, stake: Decimal = STANDARD_
         return Decimal("0.00")
 
 
-def settle_bets(session: Optional[Session] = None) -> dict:
+def settle_bets(session: Session | None = None) -> dict:
     """Settle all active value bets where match is finished.
 
     Returns:
@@ -112,7 +110,7 @@ def settle_bets(session: Optional[Session] = None) -> dict:
         stmt = (
             select(ValueBet)
             .join(Match, ValueBet.match_id == Match.id)
-            .where(ValueBet.is_active == True)
+            .where(ValueBet.is_active)
             .where(ValueBet.result.is_(None))
             .where(Match.status == MatchStatus.FINISHED)
         )
@@ -205,7 +203,7 @@ def settle_bets(session: Optional[Session] = None) -> dict:
             session.close()
 
 
-def get_betting_performance(session: Optional[Session] = None) -> dict:
+def get_betting_performance(session: Session | None = None) -> dict:
     """Get overall betting performance stats.
 
     Returns:
@@ -287,7 +285,7 @@ def print_performance_report():
     print("BETTING PERFORMANCE REPORT")
     print("=" * 70)
 
-    print(f"\nOverall Stats:")
+    print("\nOverall Stats:")
     print(f"  Total Bets: {stats['total_bets']}")
     print(f"  Won: {stats['won']} | Lost: {stats['lost']} | Void: {stats['void']}")
     print(f"  Win Rate: {stats['win_rate']:.1f}%")
@@ -295,14 +293,14 @@ def print_performance_report():
     print(f"  Total Profit: ${stats['total_profit']:+.2f}")
     print(f"  ROI: {stats['roi']:+.1f}%")
 
-    print(f"\nBy Outcome Type:")
+    print("\nBy Outcome Type:")
     print(f"  {'Outcome':<15} {'Bets':>6} {'Won':>6} {'Win%':>8} {'Profit':>10}")
     print(f"  {'-'*50}")
     for outcome, data in stats['by_outcome'].items():
         win_rate = data['won'] / data['bets'] * 100 if data['bets'] > 0 else 0
         print(f"  {outcome:<15} {data['bets']:>6} {data['won']:>6} {win_rate:>7.1f}% ${data['profit']:>+9.2f}")
 
-    print(f"\nBy Month:")
+    print("\nBy Month:")
     print(f"  {'Month':<10} {'Bets':>6} {'Won':>6} {'Win%':>8} {'Profit':>10}")
     print(f"  {'-'*45}")
     for month, data in stats['by_month'].items():

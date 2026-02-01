@@ -77,17 +77,17 @@ class Referee(Base):
     __tablename__ = "referees"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    external_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True)
+    external_id: Mapped[int | None] = mapped_column(Integer, unique=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    nationality: Mapped[Optional[str]] = mapped_column(String(50))
+    nationality: Mapped[str | None] = mapped_column(String(50))
 
     # Career statistics (updated periodically)
     matches_officiated: Mapped[int] = mapped_column(Integer, default=0)
-    avg_fouls_per_game: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
-    avg_yellow_cards: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
-    avg_red_cards: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
+    avg_fouls_per_game: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
+    avg_yellow_cards: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
+    avg_red_cards: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
     penalties_awarded: Mapped[int] = mapped_column(Integer, default=0)
-    home_win_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))  # Home win % in their games
+    home_win_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))  # Home win % in their games
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -107,10 +107,10 @@ class Manager(Base):
     __tablename__ = "managers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    external_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True)
+    external_id: Mapped[int | None] = mapped_column(Integer, unique=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    nationality: Mapped[Optional[str]] = mapped_column(String(50))
-    date_of_birth: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    nationality: Mapped[str | None] = mapped_column(String(50))
+    date_of_birth: Mapped[datetime | None] = mapped_column(DateTime)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -133,7 +133,7 @@ class ManagerTenure(Base):
     manager_id: Mapped[int] = mapped_column(ForeignKey("managers.id"), nullable=False)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime)  # NULL = current manager
+    end_date: Mapped[datetime | None] = mapped_column(DateTime)  # NULL = current manager
     is_interim: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Stats during tenure
@@ -166,13 +166,13 @@ class Team(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     external_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
-    fpl_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True)  # FPL API team ID
+    fpl_id: Mapped[int | None] = mapped_column(Integer, unique=True)  # FPL API team ID
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     short_name: Mapped[str] = mapped_column(String(50), nullable=False)
     tla: Mapped[str] = mapped_column(String(3), nullable=False)  # Three-letter abbreviation
-    crest_url: Mapped[Optional[str]] = mapped_column(String(255))
-    venue: Mapped[Optional[str]] = mapped_column(String(100))
-    founded: Mapped[Optional[int]] = mapped_column(Integer)
+    crest_url: Mapped[str | None] = mapped_column(String(255))
+    venue: Mapped[str | None] = mapped_column(String(100))
+    founded: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -212,17 +212,17 @@ class Match(Base):
     away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
 
     # Results (nullable until match finished)
-    home_score: Mapped[Optional[int]] = mapped_column(Integer)
-    away_score: Mapped[Optional[int]] = mapped_column(Integer)
-    home_ht_score: Mapped[Optional[int]] = mapped_column(Integer)
-    away_ht_score: Mapped[Optional[int]] = mapped_column(Integer)
+    home_score: Mapped[int | None] = mapped_column(Integer)
+    away_score: Mapped[int | None] = mapped_column(Integer)
+    home_ht_score: Mapped[int | None] = mapped_column(Integer)
+    away_ht_score: Mapped[int | None] = mapped_column(Integer)
 
     # xG data from Understat (nullable until available)
-    home_xg: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
-    away_xg: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    home_xg: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    away_xg: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
 
     # Referee assignment (nullable until assigned)
-    referee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("referees.id"))
+    referee_id: Mapped[int | None] = mapped_column(ForeignKey("referees.id"))
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -262,7 +262,7 @@ class EloRating(Base):
     season: Mapped[str] = mapped_column(String(10), nullable=False)
     matchweek: Mapped[int] = mapped_column(Integer, nullable=False)
     rating: Mapped[Decimal] = mapped_column(Numeric(7, 2), nullable=False)
-    rating_change: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    rating_change: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -288,20 +288,20 @@ class TeamStats(Base):
     matchweek: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Form (last 5 games)
-    form: Mapped[Optional[str]] = mapped_column(String(5))  # e.g., "WDLWW"
-    form_points: Mapped[Optional[int]] = mapped_column(Integer)
+    form: Mapped[str | None] = mapped_column(String(5))  # e.g., "WDLWW"
+    form_points: Mapped[int | None] = mapped_column(Integer)
 
     # Goals
     goals_scored: Mapped[int] = mapped_column(Integer, default=0)
     goals_conceded: Mapped[int] = mapped_column(Integer, default=0)
-    avg_goals_scored: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
-    avg_goals_conceded: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
+    avg_goals_scored: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
+    avg_goals_conceded: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
 
     # xG stats
-    xg_for: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    xg_against: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    avg_xg_for: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
-    avg_xg_against: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
+    xg_for: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    xg_against: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    avg_xg_for: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
+    avg_xg_against: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
 
     # Home/Away splits
     home_wins: Mapped[int] = mapped_column(Integer, default=0)
@@ -317,7 +317,7 @@ class TeamStats(Base):
 
     # Injuries (JSON with player details)
     # Format: {"players": [{"name": "...", "type": "...", "return_date": "..."}], "count": N}
-    injuries: Mapped[Optional[dict]] = mapped_column(JSONB)
+    injuries: Mapped[dict | None] = mapped_column(JSONB)
     injury_count: Mapped[int] = mapped_column(Integer, default=0)  # Quick access to count
     key_players_out: Mapped[int] = mapped_column(Integer, default=0)  # Star players injured
 
@@ -326,7 +326,7 @@ class TeamStats(Base):
     is_new_manager: Mapped[bool] = mapped_column(Boolean, default=False)  # < 5 games
 
     # Recent transfers/signings impact (subjective 0-10 scale)
-    transfer_impact: Mapped[Optional[int]] = mapped_column(Integer)  # Significant new signings
+    transfer_impact: Mapped[int | None] = mapped_column(Integer)  # Significant new signings
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -354,38 +354,38 @@ class MatchAnalysis(Base):
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"), unique=True, nullable=False)
 
     # Model predictions (probabilities as decimals, e.g., 0.45 = 45%)
-    elo_home_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    elo_draw_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    elo_away_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    elo_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    elo_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    elo_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
-    poisson_home_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    poisson_draw_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    poisson_away_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    poisson_over_2_5_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    poisson_btts_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    poisson_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    poisson_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    poisson_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    poisson_over_2_5_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    poisson_btts_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
-    xgboost_home_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    xgboost_draw_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    xgboost_away_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    xgboost_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    xgboost_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    xgboost_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
     # Consensus predictions (weighted average)
-    consensus_home_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    consensus_draw_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    consensus_away_prob: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    consensus_home_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    consensus_draw_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    consensus_away_prob: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
     # Predicted score
-    predicted_home_goals: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
-    predicted_away_goals: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 2))
+    predicted_home_goals: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
+    predicted_away_goals: Mapped[Decimal | None] = mapped_column(Numeric(4, 2))
 
     # AI-generated narrative
-    narrative: Mapped[Optional[str]] = mapped_column(Text)
-    narrative_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    narrative: Mapped[str | None] = mapped_column(Text)
+    narrative_generated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     # Feature data used for predictions (stored for debugging/transparency)
-    features: Mapped[Optional[dict]] = mapped_column(JSONB)
+    features: Mapped[dict | None] = mapped_column(JSONB)
 
     # Confidence score (0-1)
-    confidence: Mapped[Optional[Decimal]] = mapped_column(Numeric(4, 3))
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -411,13 +411,13 @@ class OddsHistory(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Odds values
-    home_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    draw_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    away_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    over_2_5_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    under_2_5_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    btts_yes_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
-    btts_no_odds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    home_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    draw_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    away_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    over_2_5_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    under_2_5_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    btts_yes_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    btts_no_odds: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
 
     # Relationships
     match: Mapped["Match"] = relationship("Match", back_populates="odds_history")
@@ -444,9 +444,9 @@ class TeamFixture(Base):
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     kickoff_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     competition: Mapped[str] = mapped_column(String(10), nullable=False)
-    opponent_name: Mapped[Optional[str]] = mapped_column(String(100))  # For reference
+    opponent_name: Mapped[str | None] = mapped_column(String(100))  # For reference
     is_home: Mapped[bool] = mapped_column(Boolean, default=True)
-    match_id: Mapped[Optional[int]] = mapped_column(ForeignKey("matches.id"))  # Link to full match if exists
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id"))  # Link to full match if exists
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -485,11 +485,11 @@ class ValueBet(Base):
 
     # Status tracking
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    result: Mapped[Optional[str]] = mapped_column(String(10))  # "won", "lost", "void"
-    profit_loss: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    result: Mapped[str | None] = mapped_column(String(10))  # "won", "lost", "void"
+    profit_loss: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
 
     # Strategy link (for monitoring)
-    strategy_id: Mapped[Optional[int]] = mapped_column(ForeignKey("betting_strategies.id"))
+    strategy_id: Mapped[int | None] = mapped_column(ForeignKey("betting_strategies.id"))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -521,7 +521,7 @@ class BettingStrategy(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     outcome_type: Mapped[str] = mapped_column(String(20), nullable=False)  # home_win, away_win
 
     # Strategy parameters (edge ranges, odds ranges, form filters)
@@ -529,19 +529,19 @@ class BettingStrategy(Base):
 
     # Status
     status: Mapped[StrategyStatus] = mapped_column(String(20), default=StrategyStatus.ACTIVE)
-    status_reason: Mapped[Optional[str]] = mapped_column(Text)
+    status_reason: Mapped[str | None] = mapped_column(Text)
 
     # Performance metrics
     total_bets: Mapped[int] = mapped_column(Integer, default=0)
     total_wins: Mapped[int] = mapped_column(Integer, default=0)
     total_profit: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
-    historical_roi: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
-    rolling_50_roi: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
+    historical_roi: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    rolling_50_roi: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
     consecutive_losing_streak: Mapped[int] = mapped_column(Integer, default=0)
 
     # Optimization tracking
-    last_optimized_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    last_backtest_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_optimized_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_backtest_at: Mapped[datetime | None] = mapped_column(DateTime)
     optimization_version: Mapped[int] = mapped_column(Integer, default=1)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -577,27 +577,27 @@ class StrategyMonitoringSnapshot(Base):
     # Rolling 30-bet metrics
     rolling_30_bets: Mapped[int] = mapped_column(Integer, default=0)
     rolling_30_wins: Mapped[int] = mapped_column(Integer, default=0)
-    rolling_30_roi: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
-    rolling_30_profit: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
+    rolling_30_roi: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    rolling_30_profit: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
 
     # Rolling 50-bet metrics
     rolling_50_bets: Mapped[int] = mapped_column(Integer, default=0)
     rolling_50_wins: Mapped[int] = mapped_column(Integer, default=0)
-    rolling_50_roi: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
-    rolling_50_profit: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
+    rolling_50_roi: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    rolling_50_profit: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
 
     # Cumulative metrics
     cumulative_bets: Mapped[int] = mapped_column(Integer, default=0)
-    cumulative_roi: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
+    cumulative_roi: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
 
     # Drift detection statistics
-    z_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
-    cusum_statistic: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 4))
+    z_score: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    cusum_statistic: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
     is_drift_detected: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Alerting
     alert_triggered: Mapped[bool] = mapped_column(Boolean, default=False)
-    alert_type: Mapped[Optional[str]] = mapped_column(String(50))
+    alert_type: Mapped[str | None] = mapped_column(String(50))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -634,14 +634,14 @@ class StrategyOptimizationRun(Base):
 
     # Optimization results
     n_trials: Mapped[int] = mapped_column(Integer, nullable=False)
-    best_roi_found: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
-    backtest_roi_before: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
-    backtest_roi_after: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4))
+    best_roi_found: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    backtest_roi_before: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    backtest_roi_after: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
 
     # Application status
     was_applied: Mapped[bool] = mapped_column(Boolean, default=False)
-    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    not_applied_reason: Mapped[Optional[str]] = mapped_column(Text)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime)
+    not_applied_reason: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -686,7 +686,7 @@ class Player(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     fpl_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
-    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
 
     # Basic info
     name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -724,8 +724,8 @@ class Player(Base):
 
     # Availability
     status: Mapped[str] = mapped_column(String(1), default="a")  # a, d, i, s, u
-    chance_of_playing: Mapped[Optional[int]] = mapped_column(Integer)  # 0-100
-    news: Mapped[Optional[str]] = mapped_column(Text)
+    chance_of_playing: Mapped[int | None] = mapped_column(Integer)  # 0-100
+    news: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -758,12 +758,12 @@ class PlayerMatchPerformance(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False)
-    match_id: Mapped[Optional[int]] = mapped_column(ForeignKey("matches.id"))
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id"))
 
     # Match context
     season: Mapped[str] = mapped_column(String(10), nullable=False)
     gameweek: Mapped[int] = mapped_column(Integer, nullable=False)
-    opponent_team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
+    opponent_team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
     was_home: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     # Playing time

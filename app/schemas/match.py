@@ -1,6 +1,5 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
@@ -10,40 +9,40 @@ from app.schemas.team import TeamFormResponse, TeamResponse
 class PredictionProbabilities(BaseModel):
     """Match outcome probabilities."""
 
-    home_win: Optional[Decimal] = None
-    draw: Optional[Decimal] = None
-    away_win: Optional[Decimal] = None
+    home_win: Decimal | None = None
+    draw: Decimal | None = None
+    away_win: Decimal | None = None
 
 
 class ModelPredictions(BaseModel):
     """Predictions from individual models."""
 
-    elo: Optional[PredictionProbabilities] = None
-    poisson: Optional[PredictionProbabilities] = None
-    xgboost: Optional[PredictionProbabilities] = None
-    consensus: Optional[PredictionProbabilities] = None
+    elo: PredictionProbabilities | None = None
+    poisson: PredictionProbabilities | None = None
+    xgboost: PredictionProbabilities | None = None
+    consensus: PredictionProbabilities | None = None
 
 
 class AdditionalPredictions(BaseModel):
     """Additional betting market predictions."""
 
-    over_2_5_prob: Optional[Decimal] = None
-    btts_prob: Optional[Decimal] = None
-    predicted_home_goals: Optional[Decimal] = None
-    predicted_away_goals: Optional[Decimal] = None
+    over_2_5_prob: Decimal | None = None
+    btts_prob: Decimal | None = None
+    predicted_home_goals: Decimal | None = None
+    predicted_away_goals: Decimal | None = None
 
 
 class MatchOdds(BaseModel):
     """Current odds for a match."""
 
     bookmaker: str
-    home_odds: Optional[Decimal] = None
-    draw_odds: Optional[Decimal] = None
-    away_odds: Optional[Decimal] = None
-    over_2_5_odds: Optional[Decimal] = None
-    under_2_5_odds: Optional[Decimal] = None
-    btts_yes_odds: Optional[Decimal] = None
-    btts_no_odds: Optional[Decimal] = None
+    home_odds: Decimal | None = None
+    draw_odds: Decimal | None = None
+    away_odds: Decimal | None = None
+    over_2_5_odds: Decimal | None = None
+    under_2_5_odds: Decimal | None = None
+    btts_yes_odds: Decimal | None = None
+    btts_no_odds: Decimal | None = None
     recorded_at: datetime
 
 
@@ -54,9 +53,9 @@ class MatchAnalysisResponse(BaseModel):
 
     predictions: ModelPredictions
     additional: AdditionalPredictions
-    confidence: Optional[Decimal] = None
-    narrative: Optional[str] = None
-    narrative_generated_at: Optional[datetime] = None
+    confidence: Decimal | None = None
+    narrative: str | None = None
+    narrative_generated_at: datetime | None = None
 
 
 class MatchBase(BaseModel):
@@ -77,10 +76,10 @@ class MatchResponse(MatchBase):
     external_id: int
     home_team: TeamResponse
     away_team: TeamResponse
-    home_score: Optional[int] = None
-    away_score: Optional[int] = None
-    home_xg: Optional[Decimal] = None
-    away_xg: Optional[Decimal] = None
+    home_score: int | None = None
+    away_score: int | None = None
+    home_xg: Decimal | None = None
+    away_xg: Decimal | None = None
 
     @computed_field
     @property
@@ -91,11 +90,11 @@ class MatchResponse(MatchBase):
 class MatchDetailResponse(MatchResponse):
     """Detailed match response with analysis."""
 
-    home_team_form: Optional[TeamFormResponse] = None
-    away_team_form: Optional[TeamFormResponse] = None
-    analysis: Optional[MatchAnalysisResponse] = None
-    latest_odds: Optional[list[MatchOdds]] = None
-    value_bets: Optional[list["ValueBetResponse"]] = None
+    home_team_form: TeamFormResponse | None = None
+    away_team_form: TeamFormResponse | None = None
+    analysis: MatchAnalysisResponse | None = None
+    latest_odds: list[MatchOdds] | None = None
+    value_bets: list["ValueBetResponse"] | None = None
 
 
 class MatchweekResponse(BaseModel):

@@ -20,15 +20,14 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 from scipy.stats import poisson
-from scipy.optimize import minimize
 from sqlalchemy import text
 
 from app.db.database import SyncSessionLocal
-from batch.models.zip_dixon_coles import ZIPDixonColesModel, ZIPMatchFeatures
 from batch.models.seasonal_recalibration import (
     SeasonalRecalibration,
     apply_draw_threshold_adjustment,
 )
+from batch.models.zip_dixon_coles import ZIPDixonColesModel
 
 warnings.filterwarnings("ignore")
 
@@ -206,7 +205,7 @@ def evaluate_zip_dc(df: pd.DataFrame) -> dict:
     results_by_season = defaultdict(list)
     training_started = False
 
-    for idx, row in df.iterrows():
+    for _idx, row in df.iterrows():
         home_xg = row['home_xg']
         away_xg = row['away_xg']
         home_goals = int(row['home_score'])
@@ -264,7 +263,7 @@ def evaluate_zip_dc(df: pd.DataFrame) -> dict:
         if not training_started and len(model._training_features) >= 200:
             train_result = model.train_structural_zero_model()
             if train_result['status'] == 'trained':
-                print(f"\n  Structural zero model trained:")
+                print("\n  Structural zero model trained:")
                 print(f"    Samples: {train_result['samples']}")
                 print(f"    0-0 rate: {train_result['zero_zero_rate']*100:.1f}%")
                 print(f"    0-0 recall: {train_result['recall_0_0']*100:.1f}%")
@@ -347,7 +346,7 @@ def compare_models(results: list[dict], names: list[str]):
     print(f"\n{'Model':<30} {'Accuracy':>10} {'Brier':>10} {'Draw P':>10} {'Draw R':>10} {'0-0 Acc':>10}")
     print("-" * 85)
 
-    for name, result in zip(names, results):
+    for name, result in zip(names, results, strict=False):
         print(f"{name:<30} {result['accuracy']*100:>9.1f}% {result['brier']:>10.4f} "
               f"{result['draw_precision']*100:>9.1f}% {result['draw_recall']*100:>9.1f}% "
               f"{result['zero_zero_acc']*100:>9.1f}%")
@@ -393,7 +392,7 @@ def main():
     print("2025-26 SEASON COMPARISON")
     print("=" * 70)
 
-    for name, result in zip(names, results):
+    for name, result in zip(names, results, strict=False):
         if '2025-26' in result['results']:
             r = result['results']['2025-26']
             acc = np.mean([x['correct'] for x in r]) * 100

@@ -6,7 +6,6 @@ a paid data source or web scraping.
 """
 
 from datetime import datetime
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -23,7 +22,7 @@ settings = get_settings()
 class InjuryUpdateJob:
     """Updates team injury information."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
 
     def run(self) -> dict:

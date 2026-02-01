@@ -10,8 +10,6 @@ Combines well with Pi Rating and ELO for ensemble predictions.
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -51,7 +49,7 @@ class FPLMatchPrediction:
     away_prob: float
 
     # Score matrix
-    score_matrix: Optional[np.ndarray] = None
+    score_matrix: np.ndarray | None = None
 
     # Confidence based on data quality
     confidence: float = 0.0
@@ -197,9 +195,9 @@ class FPLPredictor:
         """Calculate league average attack/defense scores by season."""
         season_data = defaultdict(lambda: {"attack": [], "defense": [], "goals": []})
 
-        for team, seasons in self._team_data.items():
+        for _team, seasons in self._team_data.items():
             for season, gws in seasons.items():
-                for gw, data in gws.items():
+                for _gw, data in gws.items():
                     season_data[season]["attack"].append(data["attack_score"])
                     season_data[season]["defense"].append(data["defense_score"])
                     season_data[season]["goals"].append(data["goals"])

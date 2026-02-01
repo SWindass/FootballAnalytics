@@ -1,5 +1,3 @@
-from collections.abc import AsyncGenerator
-import os
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -97,7 +95,6 @@ def _init_async_engine():
 async def get_async_session():
     """Dependency for FastAPI routes to get async database session."""
     _init_async_engine()
-    from sqlalchemy.ext.asyncio import AsyncSession
     async with AsyncSessionLocal() as session:
         try:
             yield session

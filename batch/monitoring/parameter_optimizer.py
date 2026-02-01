@@ -6,7 +6,6 @@ Uses Optuna for hyperparameter optimization with TPE sampler.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 
@@ -18,18 +17,17 @@ try:
 except ImportError:
     OPTUNA_AVAILABLE = False
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     BettingStrategy,
-    StrategyOptimizationRun,
-    ValueBet,
     Match,
     MatchAnalysis,
     MatchStatus,
-    TeamStats,
     OddsHistory,
+    StrategyOptimizationRun,
+    TeamStats,
 )
 
 logger = structlog.get_logger()
@@ -47,7 +45,7 @@ class OptimizationResult:
     backtest_roi_after: float
     improvement: float
     should_apply: bool
-    not_applied_reason: Optional[str] = None
+    not_applied_reason: str | None = None
 
 
 class ParameterOptimizer:
@@ -70,7 +68,7 @@ class ParameterOptimizer:
         strategy: BettingStrategy,
         n_trials: int = DEFAULT_N_TRIALS,
         lookback_years: float = DEFAULT_LOOKBACK_YEARS,
-    ) -> Optional[OptimizationResult]:
+    ) -> OptimizationResult | None:
         """Optimize parameters for a single strategy.
 
         Args:
@@ -226,7 +224,7 @@ class ParameterOptimizer:
                     odds_lookup[oh.match_id]["away_odds"] = float(oh.away_odds)
 
         # Load team stats for home form
-        seasons = set(m.season for m, _ in results)
+        seasons = {m.season for m, _ in results}
         stats_stmt = select(TeamStats).where(TeamStats.season.in_(seasons))
         stats_data = list(self.session.execute(stats_stmt).scalars().all())
         stats_lookup = {(ts.team_id, ts.season, ts.matchweek): ts for ts in stats_data}

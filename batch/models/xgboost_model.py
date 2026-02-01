@@ -3,7 +3,7 @@
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -60,11 +60,11 @@ class MatchOutcomeClassifier:
         "h2h_away_wins",
     ]
 
-    def __init__(self, config: Optional[XGBoostConfig] = None):
+    def __init__(self, config: XGBoostConfig | None = None):
         self.config = config or XGBoostConfig()
-        self.model: Optional[XGBClassifier] = None
+        self.model: XGBClassifier | None = None
         self.scaler = StandardScaler()
-        self.feature_importance: Optional[dict[str, float]] = None
+        self.feature_importance: dict[str, float] | None = None
 
     def _create_model(self) -> XGBClassifier:
         """Create XGBoost classifier with configured parameters."""
@@ -149,7 +149,7 @@ class MatchOutcomeClassifier:
 
         # Feature importance
         self.feature_importance = dict(
-            zip(X.columns, self.model.feature_importances_)
+            zip(X.columns, self.model.feature_importances_, strict=False)
         )
 
         return {
@@ -228,7 +228,7 @@ def build_feature_dataframe(
     away_stats: dict,
     home_elo: float,
     away_elo: float,
-    h2h_stats: Optional[dict] = None,
+    h2h_stats: dict | None = None,
 ) -> pd.DataFrame:
     """Build feature DataFrame for a single match prediction.
 

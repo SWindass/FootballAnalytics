@@ -128,8 +128,8 @@ def main():
     import logging
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
-    print(f"Retraining Neural Stacker Model")
-    print(f"================================")
+    print("Retraining Neural Stacker Model")
+    print("================================")
     print(f"Epochs: {args.epochs}")
     print(f"Min matches: {args.min_matches}")
     print()
@@ -141,7 +141,7 @@ def main():
     )
 
     if result["status"] == "success":
-        print(f"\nTraining complete!")
+        print("\nTraining complete!")
         print(f"  Validation accuracy: {result['val_accuracy']:.1%}")
         print(f"  Best epoch: {result['best_epoch']}")
         print(f"  Training samples: {result['train_samples']}")

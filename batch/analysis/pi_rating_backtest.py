@@ -4,8 +4,6 @@ Compares predictive accuracy of Pi Rating vs ELO using walk-forward validation.
 """
 
 import sys
-from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -18,8 +16,8 @@ sys.path.insert(0, str(project_root))
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, Team
-from batch.models.pi_rating import PiRating
 from batch.models.elo import EloRatingSystem
+from batch.models.pi_rating import PiRating
 
 
 def load_matches(session, seasons: list[str] = None) -> pd.DataFrame:
@@ -273,7 +271,6 @@ def calculate_metrics(df: pd.DataFrame, prefix: str) -> dict:
     correct_col = f"{prefix}correct"
     gd_error_col = f"{prefix}gd_error"
     gd_sq_error_col = f"{prefix}gd_sq_error"
-    outcome_col = f"{prefix}predicted_outcome"
     home_prob_col = f"{prefix}home_prob"
     draw_prob_col = f"{prefix}draw_prob"
     away_prob_col = f"{prefix}away_prob"
@@ -464,7 +461,7 @@ def compare_models(
     # Check how well predicted probabilities match actual outcomes
     prob_bins = [(0, 0.3), (0.3, 0.4), (0.4, 0.5), (0.5, 0.6), (0.6, 0.7), (0.7, 1.0)]
 
-    print(f"\nPi Rating - Home Win Calibration:")
+    print("\nPi Rating - Home Win Calibration:")
     print(f"{'Predicted Prob':<20} {'Actual Win %':>15} {'Count':>10}")
     print("-" * 45)
     for low, high in prob_bins:
@@ -547,10 +544,10 @@ def test_ensemble(
     print(f"Loaded {len(matches_df)} matches")
 
     # Run backtests
-    print(f"\nRunning Pi Rating backtest...")
+    print("\nRunning Pi Rating backtest...")
     pi_results = backtest_pi_rating(matches_df, 0.07, 0.7, warmup_matches)
 
-    print(f"Running ELO backtest...")
+    print("Running ELO backtest...")
     elo_results = backtest_elo(matches_df, 28.0, 50.0, warmup_matches)
 
     # Merge results

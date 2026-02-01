@@ -10,16 +10,16 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
 from scipy.optimize import minimize
+from scipy.stats import poisson
 from sqlalchemy import text
 
 from app.db.database import SyncSessionLocal
-from batch.models.zip_dixon_coles import ZIPDixonColesModel
 from batch.models.seasonal_recalibration import (
     SeasonalRecalibration,
     apply_draw_threshold_adjustment,
 )
+from batch.models.zip_dixon_coles import ZIPDixonColesModel
 
 warnings.filterwarnings("ignore")
 
@@ -161,7 +161,7 @@ def generate_all_model_predictions(df):
     all_predictions = []
     zip_trained = False
 
-    for idx, row in df.iterrows():
+    for _idx, row in df.iterrows():
         home_xg = row['home_xg']
         away_xg = row['away_xg']
         home_goals = int(row['home_score'])
@@ -217,8 +217,10 @@ def generate_all_model_predictions(df):
     return all_predictions
 
 
-def optimize_ensemble_weights(predictions, model_keys=['poisson', 'dc', 'dc_strong', 'zip']):
+def optimize_ensemble_weights(predictions, model_keys=None):
     """Find optimal weights for ensemble."""
+    if model_keys is None:
+        model_keys = ['poisson', 'dc', 'dc_strong', 'zip']
     n_models = len(model_keys)
 
     def objective(weights):
@@ -350,7 +352,7 @@ def main():
     weights_3, brier_3 = optimize_ensemble_weights(predictions, ['poisson', 'dc', 'dc_strong'])
     result_3 = evaluate_ensemble(predictions, weights_3, ['poisson', 'dc', 'dc_strong'])
 
-    print(f"\n  3-Model Ensemble (no ZIP):")
+    print("\n  3-Model Ensemble (no ZIP):")
     print(f"    Weights: Poisson={weights_3[0]:.2f}, DC={weights_3[1]:.2f}, DC_strong={weights_3[2]:.2f}")
     print(f"    Accuracy: {result_3['accuracy']*100:.1f}%")
     print(f"    Brier: {result_3['brier']:.4f}")
@@ -361,7 +363,7 @@ def main():
     weights_4, brier_4 = optimize_ensemble_weights(predictions, model_keys)
     result_4 = evaluate_ensemble(predictions, weights_4, model_keys)
 
-    print(f"\n  4-Model Ensemble (with ZIP):")
+    print("\n  4-Model Ensemble (with ZIP):")
     print(f"    Weights: Poisson={weights_4[0]:.2f}, DC={weights_4[1]:.2f}, DC_strong={weights_4[2]:.2f}, ZIP={weights_4[3]:.2f}")
     print(f"    Accuracy: {result_4['accuracy']*100:.1f}%")
     print(f"    Brier: {result_4['brier']:.4f}")

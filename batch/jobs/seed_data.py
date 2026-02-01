@@ -173,13 +173,13 @@ async def run_seed(seasons: list[str] = None):
             print(f"\n--- Season {season_name} ---")
 
             # Seed teams for this season
-            print(f"1. Fetching teams...")
+            print("1. Fetching teams...")
             teams_created = await seed_teams(session, season)
             print(f"   Created {teams_created} teams")
             total_teams += teams_created
 
             # Seed matches
-            print(f"2. Fetching matches...")
+            print("2. Fetching matches...")
             matches_created = await seed_matches(session, season)
             print(f"   Created {matches_created} matches")
             total_matches += matches_created

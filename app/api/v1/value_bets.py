@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -19,8 +18,8 @@ settings = get_settings()
 @router.get("/value-bets", response_model=ValueBetsListResponse)
 async def get_value_bets(
     active_only: bool = Query(default=True),
-    min_edge: Optional[float] = Query(default=None, ge=0.0, le=0.5),
-    outcome: Optional[str] = Query(default=None),
+    min_edge: float | None = Query(default=None, ge=0.0, le=0.5),
+    outcome: str | None = Query(default=None),
     limit: int = Query(default=50, le=100),
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -36,7 +35,7 @@ async def get_value_bets(
     )
 
     if active_only:
-        stmt = stmt.where(ValueBet.is_active == True)
+        stmt = stmt.where(ValueBet.is_active)
         stmt = stmt.where(Match.status == MatchStatus.SCHEDULED)
 
     if min_edge is not None:

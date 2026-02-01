@@ -12,10 +12,8 @@ Usage:
 
 import argparse
 import csv
-import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -160,7 +158,7 @@ def normalize_team_name(name: str) -> str:
     return name.strip().title() + " FC" if "FC" not in name else name.strip()
 
 
-def find_column(headers: list[str], column_type: str) -> Optional[str]:
+def find_column(headers: list[str], column_type: str) -> str | None:
     """Find the actual column name for a given column type."""
     possible_names = COLUMN_MAPPINGS.get(column_type, [])
     for name in possible_names:
@@ -169,7 +167,7 @@ def find_column(headers: list[str], column_type: str) -> Optional[str]:
     return None
 
 
-def parse_date(date_str: str) -> Optional[datetime]:
+def parse_date(date_str: str) -> datetime | None:
     """Parse date from various formats."""
     if not date_str:
         return None
@@ -244,14 +242,14 @@ def import_csv_file(filepath: Path, session, team_cache: dict, dry_run: bool = F
 
     for encoding in encodings:
         try:
-            with open(filepath, "r", encoding=encoding) as f:
+            with open(filepath, encoding=encoding) as f:
                 content = f.read()
                 break
         except UnicodeDecodeError:
             continue
 
     if content is None:
-        stats["errors"].append(f"Could not decode file with any encoding")
+        stats["errors"].append("Could not decode file with any encoding")
         return stats
 
     # Process as string
@@ -290,11 +288,16 @@ def import_csv_file(filepath: Path, session, team_cache: dict, dry_run: bool = F
 
     if not all([date_col, home_col, away_col, home_goals_col, away_goals_col]):
         missing = []
-        if not date_col: missing.append("date")
-        if not home_col: missing.append("home_team")
-        if not away_col: missing.append("away_team")
-        if not home_goals_col: missing.append("home_goals")
-        if not away_goals_col: missing.append("away_goals")
+        if not date_col:
+            missing.append("date")
+        if not home_col:
+            missing.append("home_team")
+        if not away_col:
+            missing.append("away_team")
+        if not home_goals_col:
+            missing.append("home_goals")
+        if not away_goals_col:
+            missing.append("away_goals")
         stats["errors"].append(f"Missing required columns: {missing}")
         stats["errors"].append(f"Available columns: {headers}")
         return stats

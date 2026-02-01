@@ -5,7 +5,6 @@ Combines ELO, Poisson, and XGBoost predictions into weighted averages.
 
 import argparse
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -65,7 +64,7 @@ def get_elo_ratings_for_matchweek(
 
 def calculate_elo_predictions(
     season: str,
-    matchweek: Optional[int] = None,
+    matchweek: int | None = None,
     backfill: bool = False,
 ) -> dict:
     """Calculate ELO-based match predictions.
@@ -79,7 +78,7 @@ def calculate_elo_predictions(
         Summary dict
     """
     with SyncSessionLocal() as session:
-        teams = {t.id: t for t in session.execute(select(Team)).scalars().all()}
+        {t.id: t for t in session.execute(select(Team)).scalars().all()}
 
         # Determine matchweeks to process
         if matchweek is not None:
@@ -164,9 +163,9 @@ def calculate_elo_predictions(
 
 def calculate_consensus(
     season: str,
-    matchweek: Optional[int] = None,
+    matchweek: int | None = None,
     backfill: bool = False,
-    weights: Optional[dict[str, float]] = None,
+    weights: dict[str, float] | None = None,
 ) -> dict:
     """Calculate weighted consensus from available model predictions.
 
@@ -182,7 +181,7 @@ def calculate_consensus(
     weights = weights or DEFAULT_WEIGHTS.copy()
 
     with SyncSessionLocal() as session:
-        teams = {t.id: t for t in session.execute(select(Team)).scalars().all()}
+        {t.id: t for t in session.execute(select(Team)).scalars().all()}
 
         # Determine matchweeks to process
         if matchweek is not None:

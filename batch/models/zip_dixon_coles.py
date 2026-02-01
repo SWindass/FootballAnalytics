@@ -15,9 +15,8 @@ Architecture:
 4. Final probabilities for all outcomes
 """
 
-from dataclasses import dataclass, field
-from typing import Optional
 import warnings
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.stats import poisson
@@ -59,7 +58,7 @@ class ZIPPrediction:
     away_prob: float
 
     # Score matrix
-    score_matrix: Optional[np.ndarray] = None
+    score_matrix: np.ndarray | None = None
 
     # Component probabilities
     p_structural_zero: float = 0.0  # P(structural 0-0)
@@ -116,7 +115,7 @@ class ZIPDixonColesModel:
         self.min_samples_for_training = min_samples_for_training
 
         # Structural zero model
-        self._zero_model: Optional[LogisticRegression] = None
+        self._zero_model: LogisticRegression | None = None
         self._scaler = StandardScaler()
         self._is_trained = False
 
@@ -219,7 +218,7 @@ class ZIPDixonColesModel:
 
         # Calculate metrics
         y_pred = self._zero_model.predict(X_scaled)
-        y_prob = self._zero_model.predict_proba(X_scaled)[:, 1]
+        self._zero_model.predict_proba(X_scaled)[:, 1]
 
         accuracy = (y_pred == y).mean()
         zero_zero_count = y.sum()
@@ -239,7 +238,7 @@ class ZIPDixonColesModel:
             'feature_importance': dict(zip(
                 ['rating_diff_abs', 'total_xg', 'both_defensive',
                  'mid_table_clash', 'recent_draw_rate', 'strength_parity'],
-                self._zero_model.coef_[0].tolist()
+                self._zero_model.coef_[0].tolist(), strict=False
             )),
         }
 

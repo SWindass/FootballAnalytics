@@ -1,6 +1,5 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
@@ -23,7 +22,7 @@ class ValueBetResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    match: Optional[ValueBetMatchInfo] = None
+    match: ValueBetMatchInfo | None = None
     outcome: str
     bookmaker: str
     model_probability: Decimal
@@ -33,7 +32,7 @@ class ValueBetResponse(BaseModel):
     kelly_stake: Decimal
     recommended_stake: Decimal
     is_active: bool
-    result: Optional[str] = None
+    result: str | None = None
     created_at: datetime
 
     @computed_field

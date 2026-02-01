@@ -10,23 +10,21 @@ Features include explicit agreement metrics that let the network learn
 the relationship between model consensus and prediction accuracy.
 """
 
-import os
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+
 import numpy as np
+import structlog
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-from pathlib import Path
-from typing import Optional
-from datetime import datetime, timezone
-from decimal import Decimal
-
-import structlog
 from sqlalchemy import select
+from torch.utils.data import DataLoader, TensorDataset
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, EloRating, TeamStats
+from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus
 
 logger = structlog.get_logger()
 
@@ -44,7 +42,9 @@ class ConsensusNet(nn.Module):
     - Output: Calibrated probabilities with confidence
     """
 
-    def __init__(self, input_size: int, hidden_sizes: list = [64, 32], dropout: float = 0.3):
+    def __init__(self, input_size: int, hidden_sizes: list = None, dropout: float = 0.3):
+        if hidden_sizes is None:
+            hidden_sizes = [64, 32]
         super().__init__()
 
         layers = []
@@ -107,7 +107,9 @@ class ConsensusStacker:
     def _ensure_model_dir(self):
         MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    def build_model(self, hidden_sizes: list = [64, 32], dropout: float = 0.3):
+    def build_model(self, hidden_sizes: list = None, dropout: float = 0.3):
+        if hidden_sizes is None:
+            hidden_sizes = [64, 32]
         self.model = ConsensusNet(
             input_size=self.input_size,
             hidden_sizes=hidden_sizes,
@@ -189,7 +191,7 @@ class ConsensusStacker:
         match: Match,
         analysis: MatchAnalysis,
         elo_lookup: dict,
-    ) -> Optional[list]:
+    ) -> list | None:
         """Build feature vector with agreement metrics."""
 
         def safe_float(val, default=0.0):
@@ -301,10 +303,12 @@ class ConsensusStacker:
         epochs: int = 100,
         batch_size: int = 64,
         lr: float = 0.001,
-        hidden_sizes: list = [64, 32],
+        hidden_sizes: list = None,
     ) -> dict:
         """Train the consensus stacker."""
 
+        if hidden_sizes is None:
+            hidden_sizes = [64, 32]
         X, y = self.prepare_training_data()
 
         # Time-series split (last 20% for validation)
@@ -396,7 +400,7 @@ class ConsensusStacker:
                 self.save_model({
                     "val_accuracy": val_acc,
                     "epoch": epoch,
-                    "trained_at": datetime.now(timezone.utc).isoformat(),
+                    "trained_at": datetime.now(UTC).isoformat(),
                 })
 
             if epoch % 20 == 0:

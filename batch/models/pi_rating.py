@@ -15,10 +15,8 @@ Key features:
 - Rating history tracking for analysis and visualization
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -236,7 +234,7 @@ class PiRating:
         away_team: str,
         home_goals: int,
         away_goals: int,
-        match_date: Optional[datetime] = None,
+        match_date: datetime | None = None,
         store_history: bool = True,
     ) -> tuple[float, float]:
         """Update ratings based on match result.
@@ -465,7 +463,7 @@ class PiRating:
             return 0.0
         return np.mean([abs(p["error"]) for p in self._predictions])
 
-    def get_team_rating(self, team: str) -> Optional[TeamRating]:
+    def get_team_rating(self, team: str) -> TeamRating | None:
         """Get a specific team's current rating.
 
         Parameters
@@ -643,8 +641,8 @@ def plot_rating_history(
     """
     try:
         import matplotlib.pyplot as plt
-    except ImportError:
-        raise ImportError("matplotlib is required for plotting")
+    except ImportError as e:
+        raise ImportError("matplotlib is required for plotting") from e
 
     history_df = pi_rating.get_history_dataframe()
     if history_df.empty:
@@ -699,12 +697,12 @@ if __name__ == "__main__":
     print("\nMatch Prediction:")
     print("=" * 60)
     prediction = pi.predict_match("Liverpool", "Arsenal")
-    print(f"Liverpool (H) vs Arsenal (A)")
+    print("Liverpool (H) vs Arsenal (A)")
     print(f"Expected goal difference: {prediction.predicted_goal_diff:.2f}")
-    print(f"(Positive = Liverpool expected to win)")
+    print("(Positive = Liverpool expected to win)")
 
     # Show prediction accuracy
-    print(f"\nModel Performance:")
+    print("\nModel Performance:")
     print("=" * 60)
     print(f"Mean Squared Error: {pi.calculate_mse():.4f}")
     print(f"Mean Absolute Error: {pi.calculate_mae():.4f}")

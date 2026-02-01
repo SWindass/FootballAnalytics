@@ -1,6 +1,4 @@
-from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -20,9 +18,9 @@ class TeamResponse(TeamBase):
 
     id: int
     external_id: int
-    crest_url: Optional[str] = None
-    venue: Optional[str] = None
-    form: Optional[str] = None  # Last 5 results e.g. "WWDLW"
+    crest_url: str | None = None
+    venue: str | None = None
+    form: str | None = None  # Last 5 results e.g. "WWDLW"
 
 
 class TeamStatsResponse(BaseModel):
@@ -33,20 +31,20 @@ class TeamStatsResponse(BaseModel):
     team: TeamResponse
     season: str
     matchweek: int
-    form: Optional[str] = None
-    form_points: Optional[int] = None
+    form: str | None = None
+    form_points: int | None = None
     goals_scored: int
     goals_conceded: int
-    avg_goals_scored: Optional[Decimal] = None
-    avg_goals_conceded: Optional[Decimal] = None
-    xg_for: Optional[Decimal] = None
-    xg_against: Optional[Decimal] = None
+    avg_goals_scored: Decimal | None = None
+    avg_goals_conceded: Decimal | None = None
+    xg_for: Decimal | None = None
+    xg_against: Decimal | None = None
     home_record: str  # "W-D-L" format
     away_record: str
     clean_sheets: int
     failed_to_score: int
-    elo_rating: Optional[Decimal] = None
-    injuries: Optional[list[str]] = None
+    elo_rating: Decimal | None = None
+    injuries: list[str] | None = None
 
 
 class TeamFormResponse(BaseModel):
@@ -55,7 +53,7 @@ class TeamFormResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     team: TeamResponse
-    form: Optional[str] = None
-    elo_rating: Optional[Decimal] = None
-    avg_goals_scored: Optional[Decimal] = None
-    avg_goals_conceded: Optional[Decimal] = None
+    form: str | None = None
+    elo_rating: Decimal | None = None
+    avg_goals_scored: Decimal | None = None
+    avg_goals_conceded: Decimal | None = None

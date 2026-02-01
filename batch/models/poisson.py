@@ -1,7 +1,6 @@
 """Poisson distribution model for goal prediction."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from scipy.stats import poisson
@@ -24,7 +23,7 @@ class PoissonModel:
     to estimate expected goals, then calculates outcome probabilities.
     """
 
-    def __init__(self, config: Optional[PoissonConfig] = None):
+    def __init__(self, config: PoissonConfig | None = None):
         self.config = config or PoissonConfig()
 
     def calculate_expected_goals(

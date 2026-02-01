@@ -13,14 +13,12 @@ from scipy.stats import poisson
 from sqlalchemy import text
 
 from app.db.database import SyncSessionLocal
+from batch.models.pi_dixon_coles import PiDixonColesModel
 from batch.models.seasonal_recalibration import (
-    SeasonalRecalibration,
     ConservativeRecalibration,
-    LeagueBaseline,
-    RecalibrationFactors,
+    SeasonalRecalibration,
     apply_draw_threshold_adjustment,
 )
-from batch.models.pi_dixon_coles import PiDixonColesModel
 
 warnings.filterwarnings("ignore")
 
@@ -156,7 +154,7 @@ def evaluate_with_recalibration(df: pd.DataFrame) -> dict:
     recal_applied_count = 0
 
     # Process matches chronologically
-    for idx, row in df.iterrows():
+    for _idx, row in df.iterrows():
         if pd.isna(row['home_score']):
             continue
 
@@ -260,8 +258,8 @@ def evaluate_simple_xg_with_recalibration(df: pd.DataFrame) -> dict:
         if pd.isna(row['home_xg']) or pd.isna(row['home_score']):
             continue
 
-        home_team = row['home_team']
-        away_team = row['away_team']
+        row['home_team']
+        row['away_team']
         home_goals = int(row['home_score'])
         away_goals = int(row['away_score'])
         season = row['season']

@@ -71,6 +71,25 @@ select = [
 ignore = [
     "E501",  # line too long, handled by formatter
     "B008",  # do not perform function calls in argument defaults
+    "E402",  # module level import not at top of file (needed for sys.path scripts)
+    "E722",  # bare except (acceptable in some cases)
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by formatter
+    "B008",  # do not perform function calls in argument defaults
+    "E402",  # module level import not at top of file (needed for sys.path scripts)
+    "E722",  # bare except (acceptable in some cases)
 ]
 
 [tool.ruff.isort]

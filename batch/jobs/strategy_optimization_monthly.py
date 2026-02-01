@@ -8,7 +8,6 @@ Runs on the 1st of each month at 3AM UTC to:
 
 import argparse
 from datetime import datetime
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -16,8 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
 from app.db.models import BettingStrategy, StrategyStatus
-from batch.monitoring.parameter_optimizer import ParameterOptimizer
 from batch.monitoring.alerting import AlertManager, AlertType
+from batch.monitoring.parameter_optimizer import ParameterOptimizer
 
 logger = structlog.get_logger()
 
@@ -28,7 +27,7 @@ class MonthlyOptimizationJob:
     DEFAULT_N_TRIALS = 100
     DEFAULT_LOOKBACK_YEARS = 2.0
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.optimizer = ParameterOptimizer(self.session)
         self.alert_manager = AlertManager()
@@ -37,7 +36,7 @@ class MonthlyOptimizationJob:
         self,
         n_trials: int = DEFAULT_N_TRIALS,
         lookback_years: float = DEFAULT_LOOKBACK_YEARS,
-        strategy_name: Optional[str] = None,
+        strategy_name: str | None = None,
     ) -> dict:
         """Execute the monthly optimization job.
 
@@ -139,7 +138,7 @@ class MonthlyOptimizationJob:
 def run_monthly_optimization(
     n_trials: int = 100,
     lookback_years: float = 2.0,
-    strategy_name: Optional[str] = None,
+    strategy_name: str | None = None,
 ) -> dict:
     """Entry point for monthly optimization job."""
     with SyncSessionLocal() as session:

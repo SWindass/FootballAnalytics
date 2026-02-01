@@ -8,9 +8,7 @@ Investigates:
 """
 
 import warnings
-from collections import defaultdict
 
-import numpy as np
 import pandas as pd
 from scipy.stats import poisson
 from sqlalchemy import text
@@ -173,7 +171,7 @@ def analyze_2025_26_detailed(df: pd.DataFrame, hist_avg: dict):
         print(f"  Total xG:   {total_xg:.2f}, Actual: {actual_home + actual_away:.2f}")
 
     # Outcome distribution
-    print(f"\nOutcome distribution:")
+    print("\nOutcome distribution:")
     print(f"  Home wins: {home_wins} ({home_wins/len(season_df)*100:.1f}%)")
     print(f"  Draws:     {draws} ({draws/len(season_df)*100:.1f}%)")
     print(f"  Away wins: {away_wins} ({away_wins/len(season_df)*100:.1f}%)")

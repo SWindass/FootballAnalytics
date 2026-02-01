@@ -7,14 +7,13 @@ to expand the training dataset for the neural stacker.
 import argparse
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
-from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus, Team, TeamStats
+from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus
 from batch.models.elo import EloRatingSystem
 from batch.models.poisson import PoissonModel
 
@@ -24,7 +23,7 @@ logger = structlog.get_logger()
 class HistoricalPredictionBackfill:
     """Backfills predictions for historical matches."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.elo = EloRatingSystem()
         self.poisson = PoissonModel()
@@ -341,7 +340,7 @@ def main():
 
     result = run_backfill(seasons=seasons, force=args.force)
 
-    print(f"\nBackfill complete!")
+    print("\nBackfill complete!")
     print(f"  Seasons processed: {result['seasons_processed']}")
     print(f"  Predictions created: {result['predictions_created']}")
     print(f"  Predictions updated: {result['predictions_updated']}")

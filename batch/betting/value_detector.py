@@ -13,12 +13,10 @@ Strategies (backtest validated on 2020-2025 data):
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from decimal import Decimal
-from typing import Optional
 
 import structlog
 
-from app.db.models import MatchAnalysis, TeamStats, EloRating, OddsHistory, BetOutcome
+from app.db.models import EloRating, MatchAnalysis, OddsHistory, TeamStats
 from batch.betting.kelly_criterion import KellyCalculator, KellyConfig
 
 logger = structlog.get_logger()
@@ -107,7 +105,7 @@ class TeamReliabilityTracker:
         )
         self._reliability_scores[team_id] = score
 
-    def get_reliability(self, team_id: int) -> Optional[float]:
+    def get_reliability(self, team_id: int) -> float | None:
         """Get reliability score for a team.
 
         Returns:
@@ -295,8 +293,8 @@ class ValueDetector:
 
     def __init__(
         self,
-        config: Optional[ValueDetectorConfig] = None,
-        reliability_tracker: Optional[TeamReliabilityTracker] = None,
+        config: ValueDetectorConfig | None = None,
+        reliability_tracker: TeamReliabilityTracker | None = None,
     ):
         self.config = config or ValueDetectorConfig()
         self.kelly = KellyCalculator(KellyConfig(
@@ -318,12 +316,12 @@ class ValueDetector:
         self,
         match_id: int,
         analysis: MatchAnalysis,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
         odds_history: list[OddsHistory],
-        home_team_id: Optional[int] = None,
+        home_team_id: int | None = None,
     ) -> list[ValueBetOpportunity]:
         """Find value bets for a match.
 
@@ -487,7 +485,7 @@ class ValueDetector:
 
         return deduped
 
-    def _get_model_probabilities(self, analysis: MatchAnalysis) -> Optional[dict]:
+    def _get_model_probabilities(self, analysis: MatchAnalysis) -> dict | None:
         """Extract model probabilities from analysis."""
         try:
             consensus = {
@@ -520,7 +518,7 @@ class ValueDetector:
     def _get_market_odds(
         self,
         odds_history: list[OddsHistory],
-        analysis: Optional[MatchAnalysis] = None,
+        analysis: MatchAnalysis | None = None,
     ) -> dict[str, dict[str, float]]:
         """Get most recent odds by bookmaker.
 
@@ -568,10 +566,10 @@ class ValueDetector:
         poisson_prob: float,
         market_prob: float,
         outcome: str,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
     ) -> float:
         """Calculate confidence score for a value bet.
 
@@ -671,10 +669,10 @@ class ValueDetector:
         elo_prob: float,
         poisson_prob: float,
         market_prob: float,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
     ) -> list[str]:
         """Generate human-readable reasons for the value bet."""
         reasons = []
@@ -769,7 +767,7 @@ class ValueDetector:
         if self.reliability_tracker:
             self.reliability_tracker.record_bet(team_id, won)
 
-    def get_team_reliability(self, team_id: int) -> Optional[float]:
+    def get_team_reliability(self, team_id: int) -> float | None:
         """Get reliability score for a team.
 
         Args:
@@ -862,7 +860,7 @@ def bootstrap_reliability_from_backtest(
     from sqlalchemy import select
 
     from app.db.database import SyncSessionLocal
-    from app.db.models import Match, MatchAnalysis, MatchStatus, TeamStats, EloRating, OddsHistory
+    from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory
 
     tracker = TeamReliabilityTracker(
         min_history=min_history,

@@ -54,9 +54,6 @@ analysis, but is NOT currently used in match predictions.
 """
 
 from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Optional
-from decimal import Decimal
 
 import structlog
 from sqlalchemy import select
@@ -259,7 +256,7 @@ class CongestionModel:
         self,
         team_id: int,
         rest_days: int,
-        prev_fixture: Optional[TeamFixture] = None,
+        prev_fixture: TeamFixture | None = None,
     ) -> float:
         """Calculate the congestion impact for a team's upcoming match.
 
@@ -337,7 +334,7 @@ class CongestionModel:
 
 
 # Singleton instance
-_congestion_model: Optional[CongestionModel] = None
+_congestion_model: CongestionModel | None = None
 
 
 def get_congestion_model() -> CongestionModel:

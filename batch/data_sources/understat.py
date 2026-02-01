@@ -6,10 +6,10 @@ Uses Playwright to render JavaScript and extract data from Understat pages.
 import asyncio
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 import structlog
-from playwright.async_api import async_playwright, Browser, Page
+from playwright.async_api import Browser, async_playwright
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = structlog.get_logger()
@@ -22,7 +22,7 @@ class UnderstatScraper:
     LEAGUE = "EPL"
 
     def __init__(self):
-        self._browser: Optional[Browser] = None
+        self._browser: Browser | None = None
         self._playwright = None
 
     async def _get_browser(self) -> Browser:
@@ -63,7 +63,7 @@ class UnderstatScraper:
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
                     break
-                except Exception as e:
+                except Exception:
                     if attempt < 2:
                         logger.warning(f"Attempt {attempt + 1} failed, retrying...")
                         await asyncio.sleep(2)
@@ -112,7 +112,7 @@ class UnderstatScraper:
         return matches
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def get_team_stats(self, team_name: str, season: str = "2024") -> Optional[dict[str, Any]]:
+    async def get_team_stats(self, team_name: str, season: str = "2024") -> dict[str, Any] | None:
         """Get team xG statistics for a season.
 
         Args:
@@ -172,7 +172,7 @@ def match_understat_to_fixture(
     understat_match: dict[str, Any],
     fixtures: list[dict[str, Any]],
     tolerance_hours: int = 24,
-) -> Optional[int]:
+) -> int | None:
     """Match an Understat match to a database fixture.
 
     Args:
@@ -183,7 +183,6 @@ def match_understat_to_fixture(
     Returns:
         Fixture ID if matched, None otherwise
     """
-    from datetime import timedelta
 
     us_time = understat_match["datetime"]
     us_home = understat_match["home_team"].lower()

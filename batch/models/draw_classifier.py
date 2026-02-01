@@ -11,14 +11,12 @@ Approach:
 """
 
 from dataclasses import dataclass
-from typing import Optional
-import numpy as np
 
 import structlog
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchStatus, EloRating
+from app.db.models import EloRating, Match, MatchStatus
 
 logger = structlog.get_logger()
 
@@ -98,7 +96,7 @@ class DrawClassifier:
 
             # Filter to recent seasons if requested
             if use_recent_seasons > 0:
-                seasons = sorted(set(m.season for m in matches))
+                seasons = sorted({m.season for m in matches})
                 recent_seasons = set(seasons[-use_recent_seasons:])
                 matches = [m for m in matches if m.season in recent_seasons]
                 logger.info(f"Using {len(matches)} matches from {recent_seasons}")
@@ -150,7 +148,7 @@ class DrawClassifier:
             return {
                 "buckets_calibrated": len(self.draw_rates),
                 "matches_used": len(matches),
-                "seasons_used": len(set(m.season for m in matches)),
+                "seasons_used": len({m.season for m in matches}),
             }
 
     def get_draw_probability(self, elo_diff: float) -> float:
@@ -190,7 +188,7 @@ class DrawClassifier:
         """
         # Calculate ELO difference (with home advantage)
         effective_home_elo = home_elo + home_advantage
-        elo_diff = effective_home_elo - away_elo
+        effective_home_elo - away_elo
 
         # Get calibrated draw probability (using raw diff for bucket lookup)
         raw_diff = home_elo - away_elo
@@ -237,7 +235,7 @@ class HybridPredictor:
         self,
         home_elo: float,
         away_elo: float,
-        poisson_draw_prob: Optional[float] = None,
+        poisson_draw_prob: float | None = None,
         home_advantage: float = 50.0,
     ) -> tuple[float, float, float]:
         """Predict match probabilities.
@@ -390,7 +388,7 @@ def evaluate_draw_classifier():
                     correct += 1
 
             acc = correct / len(val_matches)
-            draw_acc = draws_correct / draws_predicted if draws_predicted > 0 else 0
+            draws_correct / draws_predicted if draws_predicted > 0 else 0
 
             if acc > best_acc:
                 best_acc = acc
@@ -452,9 +450,9 @@ def evaluate_draw_classifier():
                 acc = correct_by_outcome[i] / actual_counts[i] * 100
                 print(f"{outcomes[i]}: {correct_by_outcome[i]}/{actual_counts[i]} = {acc:.1f}%")
 
-        print(f"\n--- Overall Accuracy ---")
+        print("\n--- Overall Accuracy ---")
         print(f"Draw Classifier (threshold): {total_correct/len(val_matches):.1%}")
-        print(f"Baseline ELO (no draws):     51.8%")
+        print("Baseline ELO (no draws):     51.8%")
         print("=" * 70)
 
 

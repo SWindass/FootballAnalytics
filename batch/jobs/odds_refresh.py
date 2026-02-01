@@ -12,7 +12,6 @@ import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -20,7 +19,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, Team, ValueBet, TeamStats, EloRating
+from app.db.models import (
+    EloRating,
+    Match,
+    MatchAnalysis,
+    MatchStatus,
+    OddsHistory,
+    Team,
+    TeamStats,
+    ValueBet,
+)
 from batch.betting.value_detector import ValueDetector, ValueDetectorConfig
 from batch.data_sources.the_odds_api import OddsApiClient, match_team_names, parse_odds
 
@@ -34,7 +42,7 @@ RELIABILITY_STATE_PATH = Path(__file__).parent.parent / "betting" / "reliability
 class OddsRefreshJob:
     """Refreshes odds and detects value bets."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.odds_client = OddsApiClient()
 
@@ -304,7 +312,7 @@ class OddsRefreshJob:
 
             # Deactivate existing value bets for this match
             existing = list(self.session.execute(
-                select(ValueBet).where(ValueBet.match_id == match.id).where(ValueBet.is_active == True)
+                select(ValueBet).where(ValueBet.match_id == match.id).where(ValueBet.is_active)
             ).scalars().all())
             for eb in existing:
                 eb.is_active = False
@@ -350,12 +358,12 @@ class OddsRefreshJob:
             .join(Match, ValueBet.match_id == Match.id)
             .where(ValueBet.outcome == "home_win")
             .where(Match.status == MatchStatus.FINISHED)
-            .where(ValueBet.is_active == False)  # Already processed
+            .where(not ValueBet.is_active)  # Already processed
         )
         results = list(self.session.execute(stmt).all())
 
         updates = 0
-        for value_bet, match in results:
+        for _value_bet, match in results:
             # Skip if already tracked (check via metadata or separate tracking)
             # For now, we'll rely on the lookback window to handle this
 

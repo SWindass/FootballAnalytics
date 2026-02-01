@@ -9,14 +9,13 @@ Run with: PYTHONPATH=. python batch/jobs/fix_predictions.py
 
 import argparse
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
-from app.db.models import EloRating, Match, MatchAnalysis, Team, TeamStats
+from app.db.models import EloRating, Match, MatchAnalysis, Team
 from batch.models.elo import EloRatingSystem
 from batch.models.poisson import PoissonModel, calculate_team_strengths
 
@@ -181,7 +180,7 @@ def fix_extreme_predictions(
 
 def apply_draw_adjustment_to_all(
     min_matchweek: int = 1,
-    season: Optional[str] = None,
+    season: str | None = None,
     dry_run: bool = False,
 ) -> dict:
     """Apply draw adjustment to all existing predictions.
@@ -220,7 +219,7 @@ def apply_draw_adjustment_to_all(
         updated = 0
         unchanged = 0
 
-        for match, analysis in results:
+        for _match, analysis in results:
             # Get original model predictions
             elo_probs = (
                 float(analysis.elo_home_prob),

@@ -6,7 +6,6 @@ probabilities using the Poisson distribution model.
 
 import argparse
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -14,7 +13,11 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus, Team
-from batch.models.poisson import PoissonModel, calculate_team_strengths, calculate_home_away_strengths
+from batch.models.poisson import (
+    PoissonModel,
+    calculate_home_away_strengths,
+    calculate_team_strengths,
+)
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -47,7 +50,7 @@ def get_league_averages(matches: list[dict]) -> tuple[float, float]:
 
 def calculate_team_strengths_for_season(
     season: str,
-    up_to_matchweek: Optional[int] = None,
+    up_to_matchweek: int | None = None,
 ) -> dict:
     """Calculate attack/defense strengths for all teams in a season.
 
@@ -113,7 +116,7 @@ def calculate_team_strengths_for_season(
 
 def calculate_home_away_strengths_for_season(
     season: str,
-    up_to_matchweek: Optional[int] = None,
+    up_to_matchweek: int | None = None,
 ) -> dict:
     """Calculate home/away specific attack/defense strengths.
 
@@ -154,7 +157,7 @@ def calculate_home_away_strengths_for_season(
 
 def calculate_poisson_predictions(
     season: str,
-    matchweek: Optional[int] = None,
+    matchweek: int | None = None,
     backfill: bool = False,
 ) -> dict:
     """Calculate Poisson predictions for matches.
@@ -214,7 +217,7 @@ def calculate_poisson_predictions(
             ha_strengths = calculate_home_away_strengths_for_season(season, up_to_matchweek=mw)
 
             if not ha_strengths:
-                print(f"  No prior matches to calculate strengths, using defaults")
+                print("  No prior matches to calculate strengths, using defaults")
 
             # Get matches for this matchweek
             stmt = (
@@ -333,7 +336,7 @@ def calculate_poisson_predictions(
         }
 
 
-def print_team_strengths(season: str, matchweek: Optional[int] = None) -> None:
+def print_team_strengths(season: str, matchweek: int | None = None) -> None:
     """Print team strengths table for a season.
 
     Args:

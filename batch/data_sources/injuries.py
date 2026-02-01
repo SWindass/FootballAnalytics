@@ -5,7 +5,7 @@ Uses free sources to get current injury status for EPL teams.
 
 import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -125,7 +125,7 @@ class InjuryScraper:
 
         return injuries
 
-    def _parse_injury_row(self, cells: list) -> Optional[dict]:
+    def _parse_injury_row(self, cells: list) -> dict | None:
         """Parse a single injury row."""
         try:
             player_name = cells[0].text.strip()
@@ -159,7 +159,7 @@ class InjuryScraper:
 
         return False
 
-    def _normalize_team_name(self, raw_name: str) -> Optional[str]:
+    def _normalize_team_name(self, raw_name: str) -> str | None:
         """Normalize team name to our standard format."""
         cleaned = raw_name.lower().strip()
         return TEAM_NAME_MAP.get(cleaned)
@@ -232,14 +232,14 @@ class TransfermarktScraper:
 
         return injuries
 
-    def _parse_player_injury(self, row) -> Optional[dict]:
+    def _parse_player_injury(self, row) -> dict | None:
         """Parse player injury from table row."""
         try:
             name_cell = row.find("td", class_="hauptlink")
             player_name = name_cell.text.strip() if name_cell else "Unknown"
 
             # Get injury details from tooltip or injury column
-            injury_cell = row.find("td", class_="zentriert")
+            row.find("td", class_="zentriert")
             injury_type = "Injured"
 
             # Try to get market value as proxy for key player

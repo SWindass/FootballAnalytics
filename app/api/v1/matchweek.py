@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -8,7 +7,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.config import get_settings
 from app.db.database import get_async_session
-from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, Team, TeamStats, ValueBet
+from app.db.models import Match, MatchAnalysis, MatchStatus, OddsHistory, TeamStats
 from app.schemas.match import (
     AdditionalPredictions,
     MatchAnalysisResponse,
@@ -18,13 +17,13 @@ from app.schemas.match import (
     ModelPredictions,
     PredictionProbabilities,
 )
-from app.schemas.team import TeamFormResponse, TeamResponse
+from app.schemas.team import TeamResponse
 
 router = APIRouter()
 settings = get_settings()
 
 
-def build_predictions(analysis: Optional[MatchAnalysis]) -> Optional[MatchAnalysisResponse]:
+def build_predictions(analysis: MatchAnalysis | None) -> MatchAnalysisResponse | None:
     """Build predictions response from analysis model."""
     if not analysis:
         return None
@@ -139,7 +138,7 @@ async def get_current_matchweek(
 ):
     """Get the current matchweek with all matches and analyses."""
     # Find the current/next matchweek
-    now = datetime.utcnow()
+    datetime.utcnow()
 
     # First try to find an ongoing matchweek (has both finished and scheduled matches)
     # or the next upcoming matchweek
@@ -229,7 +228,7 @@ async def get_current_matchweek(
 @router.get("/matchweek/{matchweek}", response_model=MatchweekResponse)
 async def get_matchweek(
     matchweek: int,
-    season: Optional[str] = Query(default=None),
+    season: str | None = Query(default=None),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get a specific matchweek."""

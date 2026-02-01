@@ -6,7 +6,6 @@ Supports multi-season calculation with ratings carrying over between seasons
 
 import argparse
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -20,7 +19,7 @@ logger = structlog.get_logger()
 settings = get_settings()
 
 
-def get_previous_season(season: str) -> Optional[str]:
+def get_previous_season(season: str) -> str | None:
     """Get the previous season string (e.g., '2024-25' -> '2023-24')."""
     try:
         start_year = int(season.split("-")[0])
@@ -108,7 +107,7 @@ def calculate_elo_ratings(
 
                     print(f"Applied {regression_factor:.0%} regression toward 1500")
                 else:
-                    print(f"No previous season data found, starting from 1500")
+                    print("No previous season data found, starting from 1500")
             else:
                 print("Could not determine previous season, starting from 1500")
 
@@ -132,7 +131,6 @@ def calculate_elo_ratings(
 
         # Track ratings per matchweek for ALL teams
         matchweek_ratings: dict[int, dict[int, float]] = {}  # matchweek -> {team_id -> rating}
-        previous_ratings: dict[int, float] = {}  # Track previous matchweek ratings for change calculation
 
         for matchweek in sorted(matches_by_mw.keys()):
             mw_matches = matches_by_mw[matchweek]

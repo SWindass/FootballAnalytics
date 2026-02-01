@@ -1,9 +1,7 @@
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from app.core.config import get_settings
 from app.db.database import get_async_session
@@ -45,8 +43,8 @@ async def get_team(
 @router.get("/team/{team_id}/stats", response_model=TeamStatsResponse)
 async def get_team_stats(
     team_id: int,
-    season: Optional[str] = Query(default=None),
-    matchweek: Optional[int] = Query(default=None, ge=1, le=38),
+    season: str | None = Query(default=None),
+    matchweek: int | None = Query(default=None, ge=1, le=38),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get team statistics for a specific season and matchweek."""
@@ -148,7 +146,7 @@ async def get_team_by_name(
 @router.get("/team/{team_id}/elo-history", response_model=list[dict])
 async def get_team_elo_history(
     team_id: int,
-    season: Optional[str] = Query(default=None),
+    season: str | None = Query(default=None),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get ELO rating history for a team."""

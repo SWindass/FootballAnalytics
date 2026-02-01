@@ -8,23 +8,22 @@ Core monitoring logic for:
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     BettingStrategy,
-    StrategyMonitoringSnapshot,
-    StrategyStatus,
-    SnapshotType,
-    ValueBet,
     Match,
     MatchStatus,
+    SnapshotType,
+    StrategyMonitoringSnapshot,
+    StrategyStatus,
+    ValueBet,
 )
-from batch.monitoring.drift_detector import DriftDetector, DriftResult
 from batch.monitoring.alerting import AlertManager, AlertType
+from batch.monitoring.drift_detector import DriftDetector, DriftResult
 
 logger = structlog.get_logger()
 
@@ -45,7 +44,7 @@ class StrategyMonitor:
     def create_weekly_snapshot(
         self,
         strategy: BettingStrategy,
-        snapshot_date: Optional[datetime] = None,
+        snapshot_date: datetime | None = None,
     ) -> StrategyMonitoringSnapshot:
         """Create a weekly performance snapshot for a strategy.
 

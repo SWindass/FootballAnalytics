@@ -8,10 +8,10 @@ import argparse
 from datetime import datetime
 
 import structlog
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import BettingStrategy, ValueBet, Match, TeamStats
+from app.db.models import BettingStrategy, Match, TeamStats, ValueBet
 
 logger = structlog.get_logger()
 
@@ -63,7 +63,7 @@ def backfill_strategy_ids(dry_run: bool = False) -> dict:
         }
 
         # Load team stats for form data
-        seasons = set(m.season for m in matches.values())
+        seasons = {m.season for m in matches.values()}
         stats = {
             (ts.team_id, ts.season, ts.matchweek): ts
             for ts in session.execute(

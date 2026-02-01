@@ -11,18 +11,15 @@ Architecture:
 5. Final calibrated probabilities
 """
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-from scipy.special import factorial
 from scipy.stats import poisson
-from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import calibration_curve
+from sklearn.linear_model import LogisticRegression
 
 from batch.models.pi_rating import PiRating
 
@@ -49,10 +46,10 @@ class MatchFeatures:
     mid_table_clash: int  # 1 if both teams mid-table
 
     # Team context (optional)
-    home_league_pos: Optional[int] = None
-    away_league_pos: Optional[int] = None
-    home_xga_vs_avg: Optional[float] = None
-    away_xga_vs_avg: Optional[float] = None
+    home_league_pos: int | None = None
+    away_league_pos: int | None = None
+    home_xga_vs_avg: float | None = None
+    away_xga_vs_avg: float | None = None
 
 
 @dataclass
@@ -64,7 +61,7 @@ class MatchProbabilities:
     away_win: float
 
     # Score matrix (optional)
-    score_matrix: Optional[np.ndarray] = None
+    score_matrix: np.ndarray | None = None
 
     # Component probabilities for analysis
     poisson_home: float = 0.0
@@ -156,7 +153,7 @@ class PiDixonColesModel:
         )
 
         # Draw multiplier model (trained separately)
-        self.draw_model: Optional[LogisticRegression] = None
+        self.draw_model: LogisticRegression | None = None
         self.draw_model_trained = False
 
         # League context for features
@@ -529,7 +526,7 @@ class PiDixonColesModel:
         away_team: str,
         home_goals: int,
         away_goals: int,
-        match_date: Optional[datetime] = None,
+        match_date: datetime | None = None,
         collect_training_data: bool = True,
     ) -> None:
         """Update model after a match result.
@@ -604,7 +601,7 @@ class PiDixonColesModel:
 
         # Calculate metrics
         y_pred = self.draw_model.predict(X)
-        y_prob = self.draw_model.predict_proba(X)[:, 1]
+        self.draw_model.predict_proba(X)[:, 1]
 
         accuracy = (y_pred == y).mean()
         draw_recall = y_pred[y == 1].mean() if y.sum() > 0 else 0
@@ -619,7 +616,7 @@ class PiDixonColesModel:
             "feature_importance": dict(zip(
                 ["strength_parity", "low_scoring", "both_defensive",
                  "mid_table_clash", "rating_diff_abs", "total_xg"],
-                self.draw_model.coef_[0].tolist()
+                self.draw_model.coef_[0].tolist(), strict=False
             )),
         }
 
@@ -736,7 +733,7 @@ def create_calibration_plot(
     )
 
     # Brier score for draws
-    brier = np.mean([(p - a) ** 2 for p, a in zip(draw_probs, draw_actuals)])
+    brier = np.mean([(p - a) ** 2 for p, a in zip(draw_probs, draw_actuals, strict=False)])
 
     return {
         "prob_true": prob_true.tolist(),

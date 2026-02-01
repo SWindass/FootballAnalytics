@@ -8,7 +8,6 @@ Evaluates:
 """
 
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -20,10 +19,12 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, Team, OddsHistory
-from batch.models.pi_dixon_coles import PiDixonColesModel, MatchProbabilities, create_calibration_plot
+from app.db.models import Match, OddsHistory, Team
+from batch.models.elo import EloConfig, EloRatingSystem
+from batch.models.pi_dixon_coles import (
+    PiDixonColesModel,
+)
 from batch.models.pi_rating import PiRating
-from batch.models.elo import EloRatingSystem, EloConfig
 
 
 def load_matches_with_odds(
@@ -524,7 +525,7 @@ def main():
     print(f"\nActual draws: {total_draws}/{total_matches} ({total_draws/total_matches:.1%})")
 
     # Compare predicted draw rates
-    print(f"\nAverage predicted draw probability:")
+    print("\nAverage predicted draw probability:")
     print(f"  Pi+DC:    {results_df['pidc_draw_prob'].mean():.1%}")
     print(f"  Pi Base:  {results_df['pi_draw_prob'].mean():.1%}")
     print(f"  ELO:      {results_df['elo_draw_prob'].mean():.1%}")
@@ -599,7 +600,7 @@ def main():
 
         print(f"\n{'Feature':<20} {'Coefficient':>15} {'Direction':>15}")
         print("-" * 50)
-        for feat, coef in sorted(zip(features, coefs), key=lambda x: -abs(x[1])):
+        for feat, coef in sorted(zip(features, coefs, strict=False), key=lambda x: -abs(x[1])):
             direction = "More draws" if coef > 0 else "Fewer draws"
             print(f"{feat:<20} {coef:>+15.4f} {direction:>15}")
 
@@ -611,7 +612,7 @@ def main():
     pidc_brier_improvement = (pi_metrics["brier_score"] - pidc_metrics["brier_score"]) / pi_metrics["brier_score"] * 100
     pidc_draw_improvement = (pi_metrics["draw_brier"] - pidc_metrics["draw_brier"]) / pi_metrics["draw_brier"] * 100
 
-    print(f"\nPi + Dixon-Coles vs Pi Baseline:")
+    print("\nPi + Dixon-Coles vs Pi Baseline:")
     print(f"  Brier Score Improvement: {pidc_brier_improvement:+.2f}%")
     print(f"  Draw Brier Improvement:  {pidc_draw_improvement:+.2f}%")
     print(f"  Optimal rho:             {backtest['rho']:.4f}")

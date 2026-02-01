@@ -8,16 +8,14 @@ import argparse
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 import structlog
 from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
-from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus, Team
+from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus
 from batch.models.xgboost_model import MatchOutcomeClassifier
 
 logger = structlog.get_logger()
@@ -319,12 +317,12 @@ def train_model(
     classifier = MatchOutcomeClassifier()
     metrics = classifier.train(df, test_size=test_size)
 
-    print(f"\nTraining Results:")
+    print("\nTraining Results:")
     print(f"  Train Accuracy: {metrics['train_accuracy']:.1%}")
     print(f"  Test Accuracy: {metrics['test_accuracy']:.1%}")
     print(f"  CV Mean: {metrics['cv_mean']:.1%} (+/- {metrics['cv_std']:.1%})")
 
-    print(f"\nTop 10 Feature Importance:")
+    print("\nTop 10 Feature Importance:")
     sorted_features = sorted(
         metrics["feature_importance"].items(),
         key=lambda x: x[1],
@@ -349,7 +347,7 @@ def train_model(
 
 def generate_predictions(
     season: str,
-    matchweek: Optional[int] = None,
+    matchweek: int | None = None,
     backfill: bool = False,
 ) -> dict:
     """Generate XGBoost predictions for matches.

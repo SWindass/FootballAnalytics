@@ -1,10 +1,6 @@
 """ELO rating system for team strength estimation."""
 
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import Optional
-
-import numpy as np
 
 
 @dataclass
@@ -31,7 +27,7 @@ class EloRatingSystem:
     - Season regression (teams regress toward mean between seasons)
     """
 
-    def __init__(self, config: Optional[EloConfig] = None):
+    def __init__(self, config: EloConfig | None = None):
         self.config = config or EloConfig()
         self.ratings: dict[int, float] = {}  # team_id -> rating
 
@@ -195,7 +191,7 @@ class EloRatingSystem:
 
 def calculate_elo_for_season(
     matches: list[dict],
-    initial_ratings: Optional[dict[int, float]] = None,
+    initial_ratings: dict[int, float] | None = None,
 ) -> dict[int, list[tuple[int, float, float]]]:
     """Calculate ELO ratings progression through a season.
 

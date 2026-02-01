@@ -8,9 +8,8 @@ Free, official API providing player-level data including:
 - Match-by-match performance
 """
 
-import asyncio
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -78,7 +77,7 @@ class FPLClient:
         """
         return await self._make_request(f"event/{gameweek}/live/")
 
-    async def get_fixtures(self, gameweek: Optional[int] = None) -> list[dict[str, Any]]:
+    async def get_fixtures(self, gameweek: int | None = None) -> list[dict[str, Any]]:
         """Get fixtures, optionally filtered by gameweek."""
         endpoint = "fixtures/"
         if gameweek:
@@ -95,7 +94,7 @@ class FPLClient:
         data = await self.get_bootstrap_static()
         return data.get("teams", [])
 
-    async def get_current_gameweek(self) -> Optional[int]:
+    async def get_current_gameweek(self) -> int | None:
         """Get the current gameweek number."""
         data = await self.get_bootstrap_static()
         events = data.get("events", [])

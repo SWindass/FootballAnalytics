@@ -8,18 +8,16 @@ Instead, we learn which situations our model handles better than the market.
 """
 
 import json
-import numpy as np
-from pathlib import Path
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Optional
+from datetime import UTC, datetime
+from pathlib import Path
 
+import numpy as np
 import structlog
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, EloRating, TeamStats, Team
+from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus, Team, TeamStats
 
 logger = structlog.get_logger()
 
@@ -56,13 +54,13 @@ class MetaFeatures:
         match: Match,
         analysis: MatchAnalysis,
         outcome: str,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
-        home_team: Optional[Team],
-        away_team: Optional[Team],
-    ) -> Optional[np.ndarray]:
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
+        home_team: Team | None,
+        away_team: Team | None,
+    ) -> np.ndarray | None:
         """Extract meta-features for predicting model vs market accuracy.
 
         Features capture:
@@ -167,7 +165,7 @@ class MetaFeatures:
             return None
 
     @staticmethod
-    def _get_model_prob(analysis: MatchAnalysis, outcome: str) -> Optional[float]:
+    def _get_model_prob(analysis: MatchAnalysis, outcome: str) -> float | None:
         """Get consensus model probability for outcome."""
         if outcome == "home_win":
             return float(analysis.consensus_home_prob) if analysis.consensus_home_prob else None
@@ -178,7 +176,7 @@ class MetaFeatures:
         return None
 
     @staticmethod
-    def _get_market_prob(analysis: MatchAnalysis, outcome: str) -> Optional[float]:
+    def _get_market_prob(analysis: MatchAnalysis, outcome: str) -> float | None:
         """Get market probability from historical odds."""
         if not analysis.features:
             return None
@@ -196,7 +194,7 @@ class MetaFeatures:
         return None
 
     @staticmethod
-    def _get_elo_prob(analysis: MatchAnalysis, outcome: str) -> Optional[float]:
+    def _get_elo_prob(analysis: MatchAnalysis, outcome: str) -> float | None:
         """Get ELO model probability for outcome."""
         if outcome == "home_win":
             return float(analysis.elo_home_prob) if analysis.elo_home_prob else None
@@ -207,7 +205,7 @@ class MetaFeatures:
         return None
 
     @staticmethod
-    def _get_poisson_prob(analysis: MatchAnalysis, outcome: str) -> Optional[float]:
+    def _get_poisson_prob(analysis: MatchAnalysis, outcome: str) -> float | None:
         """Get Poisson model probability for outcome."""
         if outcome == "home_win":
             return float(analysis.poisson_home_prob) if analysis.poisson_home_prob else None
@@ -269,7 +267,7 @@ class MetaModel:
         "away_injuries",
     ]
 
-    def __init__(self, config: Optional[MetaModelConfig] = None):
+    def __init__(self, config: MetaModelConfig | None = None):
         self.config = config or MetaModelConfig()
         self.weights = None
         self.bias = self.config.init_bias
@@ -307,7 +305,7 @@ class MetaModel:
 
         if metadata is None:
             metadata = {}
-        metadata["saved_at"] = datetime.now(timezone.utc).isoformat()
+        metadata["saved_at"] = datetime.now(UTC).isoformat()
         metadata["n_features"] = self.n_features
         metadata["feature_names"] = self.FEATURE_NAMES
 
@@ -511,7 +509,7 @@ class MetaModel:
         })
 
         # Feature importance
-        importance = list(zip(self.FEATURE_NAMES, np.abs(self.weights)))
+        importance = list(zip(self.FEATURE_NAMES, np.abs(self.weights), strict=False))
         importance.sort(key=lambda x: x[1], reverse=True)
 
         logger.info("\nTop 10 most important features:")
@@ -530,13 +528,13 @@ class MetaModel:
         match: Match,
         analysis: MatchAnalysis,
         outcome: str,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
-        home_team: Optional[Team],
-        away_team: Optional[Team],
-    ) -> Optional[float]:
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
+        home_team: Team | None,
+        away_team: Team | None,
+    ) -> float | None:
         """Predict probability that betting on model's prediction is profitable.
 
         Args:
@@ -583,7 +581,7 @@ if __name__ == "__main__":
 
     print("Training Meta-Model...")
     metrics = train_meta_model()
-    print(f"\nTraining complete:")
+    print("\nTraining complete:")
     print(f"  Best validation accuracy: {metrics['best_val_acc']:.1%}")
     print(f"  Training samples: {metrics['train_samples']}")
     print(f"  Validation samples: {metrics['val_samples']}")

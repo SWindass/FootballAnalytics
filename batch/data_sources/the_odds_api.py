@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -20,10 +20,10 @@ class OddsApiClient:
     BASE_URL = "https://api.the-odds-api.com/v4"
     SPORT = "soccer_epl"  # EPL identifier
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.odds_api_key
-        self._requests_remaining: Optional[int] = None
-        self._requests_used: Optional[int] = None
+        self._requests_remaining: int | None = None
+        self._requests_used: int | None = None
 
     def _update_quota(self, headers: dict) -> None:
         """Update API quota tracking from response headers."""
@@ -38,12 +38,12 @@ class OddsApiClient:
         )
 
     @property
-    def requests_remaining(self) -> Optional[int]:
+    def requests_remaining(self) -> int | None:
         return self._requests_remaining
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _make_request(
-        self, endpoint: str, params: Optional[dict] = None
+        self, endpoint: str, params: dict | None = None
     ) -> dict[str, Any] | list[dict[str, Any]]:
         """Make API request with retries."""
         url = f"{self.BASE_URL}/{endpoint}"
@@ -62,7 +62,7 @@ class OddsApiClient:
         markets: str = "h2h,totals",
         regions: str = "uk,eu",
         odds_format: str = "decimal",
-        bookmakers: Optional[str] = None,
+        bookmakers: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get current odds for EPL matches.
 
@@ -153,7 +153,7 @@ def match_team_names(
     odds_home: str,
     odds_away: str,
     db_teams: list[dict[str, str]],
-) -> tuple[Optional[int], Optional[int]]:
+) -> tuple[int | None, int | None]:
     """Match team names from odds API to database team IDs.
 
     Args:
@@ -199,7 +199,7 @@ def match_team_names(
                 name = name[:-len(suffix)]
         return name
 
-    def find_team(name: str) -> Optional[int]:
+    def find_team(name: str) -> int | None:
         name_lower = name.lower()
         # First check if there's an explicit mapping
         mapped_name = api_to_db_name.get(name_lower, name_lower)

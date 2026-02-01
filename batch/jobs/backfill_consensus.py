@@ -8,21 +8,19 @@ Run with: PYTHONPATH=. python batch/jobs/backfill_consensus.py
 
 import argparse
 from decimal import Decimal
-from typing import Optional
 
-import numpy as np
 import structlog
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, EloRating
+from app.db.models import EloRating, Match, MatchAnalysis
 from batch.models.consensus_stacker import ConsensusStacker
 
 logger = structlog.get_logger()
 
 
 def backfill_with_consensus_stacker(
-    season: Optional[str] = None,
+    season: str | None = None,
     dry_run: bool = False,
     batch_size: int = 500,
 ) -> dict:

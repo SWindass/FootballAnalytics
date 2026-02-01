@@ -8,12 +8,11 @@ import asyncio
 import io
 from collections import defaultdict
 from datetime import datetime
-from typing import Optional
 
 import httpx
 import pandas as pd
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
@@ -82,7 +81,7 @@ FPL_TEAM_NAME_MAP = {
 class PlayerTeamSyncer:
     """Synchronizes player team mappings from FPL CSV data."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self._team_cache: dict[str, int] = {}  # FPL team name -> our team_id
         self._player_teams: dict[str, str] = {}  # player name -> FPL team name
@@ -197,7 +196,7 @@ class PlayerTeamSyncer:
             master_url = f"{GITHUB_RAW_BASE}/master_team_list.csv"
             master_response = await client.get(master_url, timeout=30)
             if master_response.status_code != 200:
-                logger.warning(f"No master_team_list.csv found")
+                logger.warning("No master_team_list.csv found")
                 return
 
             master_df = pd.read_csv(io.StringIO(master_response.text))
@@ -284,8 +283,8 @@ class PlayerTeamSyncer:
 
     def _strip_accents(self, name: str) -> str:
         """Remove accents and special characters for fuzzy matching."""
-        import unicodedata
         import re
+        import unicodedata
         # First, remove corrupted characters like '�' (replacement character)
         name = name.replace('�', '').replace('\ufffd', '')
         # Normalize unicode and decompose accented characters
@@ -410,7 +409,7 @@ def run_player_team_sync():
 
 if __name__ == "__main__":
     result = run_player_team_sync()
-    print(f"\nSync completed:")
+    print("\nSync completed:")
     print(f"  Players with teams before: {result['players_before']} ({result['coverage_before']})")
     print(f"  Players with teams after:  {result['players_after']} ({result['coverage_after']})")
     print(f"  Players updated: {result['players_updated']}")

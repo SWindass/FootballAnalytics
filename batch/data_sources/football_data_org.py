@@ -2,7 +2,7 @@
 
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import structlog
@@ -27,7 +27,7 @@ class FootballDataClient:
         "EL": "UEFA Europa League",  # Not on free tier but included for completeness
     }
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.football_data_api_key
         self.rate_limit = settings.football_data_rate_limit
         self._last_request_time = 0.0
@@ -44,7 +44,7 @@ class FootballDataClient:
         self._last_request_time = time.time()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def _make_request(self, endpoint: str, params: Optional[dict] = None) -> dict[str, Any]:
+    async def _make_request(self, endpoint: str, params: dict | None = None) -> dict[str, Any]:
         """Make API request with rate limiting and retries."""
         self._rate_limit_wait()
 
@@ -65,11 +65,11 @@ class FootballDataClient:
 
     async def get_matches(
         self,
-        season: Optional[str] = None,
-        matchday: Optional[int] = None,
-        status: Optional[str] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
+        season: str | None = None,
+        matchday: int | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get matches with optional filters.
 
@@ -99,7 +99,7 @@ class FootballDataClient:
         """Get a specific match by ID."""
         return await self._make_request(f"matches/{match_id}")
 
-    async def get_standings(self, season: Optional[str] = None) -> dict[str, Any]:
+    async def get_standings(self, season: str | None = None) -> dict[str, Any]:
         """Get current league standings."""
         params = {"season": season} if season else {}
         data = await self._make_request(
@@ -110,8 +110,8 @@ class FootballDataClient:
     async def get_team_matches(
         self,
         team_id: int,
-        season: Optional[str] = None,
-        status: Optional[str] = None,
+        season: str | None = None,
+        status: str | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Get matches for a specific team."""
@@ -127,11 +127,11 @@ class FootballDataClient:
     async def get_competition_matches(
         self,
         competition: str,
-        season: Optional[str] = None,
-        matchday: Optional[int] = None,
-        status: Optional[str] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
+        season: str | None = None,
+        matchday: int | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get matches for a specific competition.
 
@@ -161,7 +161,7 @@ class FootballDataClient:
     async def get_all_team_matches(
         self,
         team_external_id: int,
-        season: Optional[str] = None,
+        season: str | None = None,
         competitions: list[str] = None,
     ) -> list[dict[str, Any]]:
         """Get ALL matches for a team across multiple competitions.

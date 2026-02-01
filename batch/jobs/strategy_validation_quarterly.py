@@ -9,21 +9,20 @@ Runs on Jan/Apr/Jul/Oct 1st at 4AM UTC to:
 import argparse
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
 from app.db.models import (
     BettingStrategy,
-    StrategyMonitoringSnapshot,
-    StrategyStatus,
-    SnapshotType,
-    ValueBet,
     Match,
     MatchStatus,
+    SnapshotType,
+    StrategyMonitoringSnapshot,
+    StrategyStatus,
+    ValueBet,
 )
 from batch.monitoring.alerting import AlertManager, AlertType
 
@@ -38,7 +37,7 @@ class QuarterlyValidationJob:
     MIN_WIN_RATE_THRESHOLD = 0.40  # Warn if win rate < 40%
     MIN_BETS_FOR_VALIDATION = 30  # Need at least 30 bets in the quarter
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.alert_manager = AlertManager()
 

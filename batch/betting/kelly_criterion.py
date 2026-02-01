@@ -1,8 +1,6 @@
 """Kelly Criterion calculator for optimal bet sizing."""
 
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import Optional
 
 
 @dataclass
@@ -30,7 +28,7 @@ class KellyCalculator:
     - q = probability of losing (1 - p)
     """
 
-    def __init__(self, config: Optional[KellyConfig] = None):
+    def __init__(self, config: KellyConfig | None = None):
         self.config = config or KellyConfig()
 
     def calculate_kelly_stake(

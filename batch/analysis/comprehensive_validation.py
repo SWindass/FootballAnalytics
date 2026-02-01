@@ -14,13 +14,11 @@ Parts:
 """
 
 import warnings
-from collections import defaultdict
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
 from scipy.optimize import minimize
+from scipy.stats import poisson
 from sqlalchemy import text
 
 from app.db.database import SyncSessionLocal
@@ -131,8 +129,10 @@ def generate_predictions(df):
     return predictions
 
 
-def optimize_weights(predictions, model_keys=['poisson', 'dc', 'dc_strong']):
+def optimize_weights(predictions, model_keys=None):
     """Find optimal ensemble weights on given predictions."""
+    if model_keys is None:
+        model_keys = ['poisson', 'dc', 'dc_strong']
     n_models = len(model_keys)
 
     def objective(weights):
@@ -163,8 +163,10 @@ def optimize_weights(predictions, model_keys=['poisson', 'dc', 'dc_strong']):
     return result.x / result.x.sum()
 
 
-def evaluate_with_weights(predictions, weights, model_keys=['poisson', 'dc', 'dc_strong']):
+def evaluate_with_weights(predictions, weights, model_keys=None):
     """Evaluate predictions with given ensemble weights."""
+    if model_keys is None:
+        model_keys = ['poisson', 'dc', 'dc_strong']
     correct = 0
     brier = 0
     draw_predicted = 0
@@ -221,7 +223,7 @@ def part1_held_out_test(predictions):
     validation = [p for p in predictions if p['season'] == '2022-23']
     test = [p for p in predictions if p['season'] == '2023-24']
 
-    print(f"\n  Data split:")
+    print("\n  Data split:")
     print(f"    Training (2014-2022):    {len(train)} matches")
     print(f"    Validation (2022-23):    {len(validation)} matches")
     print(f"    Held-out test (2023-24): {len(test)} matches")
@@ -235,7 +237,7 @@ def part1_held_out_test(predictions):
     val_result = evaluate_with_weights(validation, weights_train)
     test_result = evaluate_with_weights(test, weights_train)
 
-    print(f"\n  Results with TRAINING-OPTIMIZED weights:")
+    print("\n  Results with TRAINING-OPTIMIZED weights:")
     print(f"    {'Dataset':<25} {'Accuracy':>10} {'Brier':>10}")
     print(f"    {'-'*50}")
     print(f"    {'Training (2014-2022)':<25} {train_result['accuracy']*100:>9.1f}% {train_result['brier']:>10.4f}")
@@ -274,7 +276,7 @@ def part2_walk_forward(predictions):
     print("PART 2: WALK-FORWARD VALIDATION")
     print("=" * 70)
 
-    seasons = sorted(set(p['season'] for p in predictions))
+    seasons = sorted({p['season'] for p in predictions})
 
     # Start from 2018-19 (need enough training data)
     test_seasons = [s for s in seasons if s >= '2018-19']
@@ -286,14 +288,14 @@ def part2_walk_forward(predictions):
 
     for test_season in test_seasons:
         # Training: all seasons before test season
-        train = [p for p in predictions if p['season'] < test_season]
+        [p for p in predictions if p['season'] < test_season]
 
         # Validation: season just before test (for weight optimization)
         val_seasons = [s for s in seasons if s < test_season]
         if len(val_seasons) >= 2:
             val_season = val_seasons[-1]
             train_for_weights = [p for p in predictions if p['season'] < val_season]
-            val_for_weights = [p for p in predictions if p['season'] == val_season]
+            [p for p in predictions if p['season'] == val_season]
 
             if len(train_for_weights) >= 100:
                 weights = optimize_weights(train_for_weights)
@@ -346,7 +348,7 @@ def part3_cross_validation(predictions):
     print("PART 3: LEAVE-ONE-SEASON-OUT CROSS-VALIDATION")
     print("=" * 70)
 
-    seasons = sorted(set(p['season'] for p in predictions))
+    seasons = sorted({p['season'] for p in predictions})
     # Focus on seasons with enough data
     test_seasons = [s for s in seasons if s >= '2018-19']
 
@@ -369,7 +371,7 @@ def part3_cross_validation(predictions):
         # Evaluate on held-out season
         result = evaluate_with_weights(test, weights)
 
-        n_train_seasons = len(set(p['season'] for p in train))
+        n_train_seasons = len({p['season'] for p in train})
         print(f"  {held_out:<20} {n_train_seasons} seasons{'':<10} {result['accuracy']*100:>9.1f}% {result['brier']:>10.4f}")
 
         results.append({
@@ -386,7 +388,7 @@ def part3_cross_validation(predictions):
     max_acc = np.max(accuracies)
 
     print(f"  {'-'*65}")
-    print(f"\n  Cross-validation statistics:")
+    print("\n  Cross-validation statistics:")
     print(f"    Mean accuracy:     {mean_acc*100:.1f}%")
     print(f"    Std deviation:     {std_acc*100:.1f}pp")
     print(f"    Worst season:      {min_acc*100:.1f}%")
@@ -416,7 +418,7 @@ def part4_leakage_check(df, predictions):
 
     # Check 1: Date ranges
     print("\n  1. Date Range Check:")
-    seasons = sorted(set(p['season'] for p in predictions))
+    seasons = sorted({p['season'] for p in predictions})
 
     for season in seasons[-5:]:  # Last 5 seasons
         season_df = df[df['season'] == season]
@@ -513,8 +515,10 @@ def part5_comparison(results):
 # PART 6: Betting Simulation
 # ============================================================================
 
-def part6_betting_simulation(predictions, test_seasons=['2023-24', '2024-25']):
+def part6_betting_simulation(predictions, test_seasons=None):
     """Simulate realistic betting on held-out data."""
+    if test_seasons is None:
+        test_seasons = ['2023-24', '2024-25']
     print("\n" + "=" * 70)
     print("PART 6: BETTING SIMULATION")
     print("=" * 70)
@@ -609,7 +613,7 @@ def part6_betting_simulation(predictions, test_seasons=['2023-24', '2024-25']):
         avg_edge = np.mean([b['edge'] for b in bet_results])
         avg_odds = np.mean([b['odds'] for b in bet_results])
 
-        print(f"\n  Betting Results:")
+        print("\n  Betting Results:")
         print(f"    Bets placed:     {bets_placed}")
         print(f"    Win rate:        {win_rate*100:.1f}%")
         print(f"    Average edge:    {avg_edge*100:.1f}%")
@@ -648,7 +652,7 @@ def part7_recommendations(results):
     cv_acc = results['cross_val']['mean_accuracy']
     cv_std = results['cross_val']['std_accuracy']
 
-    print(f"\n  Validation Summary:")
+    print("\n  Validation Summary:")
     print(f"    Held-out test:     {held_out_acc*100:.1f}%")
     print(f"    Walk-forward avg:  {walk_forward_acc*100:.1f}%")
     print(f"    Cross-val avg:     {cv_acc*100:.1f}% (±{cv_std*100:.1f}%)")
@@ -656,10 +660,10 @@ def part7_recommendations(results):
 
     if conservative_acc >= 0.58:
         status = "VALIDATED"
-        recommendation = """
+        recommendation = f"""
   ✓ MODEL IS VALIDATED FOR DEPLOYMENT
 
-    Conservative estimate: {:.1f}% accuracy
+    Conservative estimate: {conservative_acc * 100:.1f}% accuracy
 
     Findings:
     - Out-of-sample performance confirms in-sample results
@@ -672,18 +676,18 @@ def part7_recommendations(results):
     3. Proceed to paper trading
 
     Betting readiness: PROCEED TO PAPER TRADING
-""".format(conservative_acc * 100)
+"""
 
     elif conservative_acc >= 0.55:
         status = "MODERATE"
-        recommendation = """
+        recommendation = f"""
   ⚠ MODEL IS GOOD BUT NOT ELITE
 
-    Conservative estimate: {:.1f}% accuracy
+    Conservative estimate: {conservative_acc * 100:.1f}% accuracy
 
     Findings:
     - Model performs adequately out-of-sample
-    - Some variance across seasons (std = {:.1f}pp)
+    - Some variance across seasons (std = {cv_std * 100:.1f}pp)
     - Room for improvement
 
     Recommended next steps:
@@ -692,18 +696,18 @@ def part7_recommendations(results):
     3. Paper trade before live deployment
 
     Betting readiness: PAPER TRADE FIRST
-""".format(conservative_acc * 100, cv_std * 100)
+"""
 
     else:
         status = "OVERFIT"
         overfit_gap = results['held_out']['overfit_gap']
-        recommendation = """
+        recommendation = f"""
   ✗ MODEL SHOWS SIGNS OF OVERFITTING
 
-    Conservative estimate: {:.1f}% accuracy
+    Conservative estimate: {conservative_acc * 100:.1f}% accuracy
 
     Findings:
-    - Large gap between train and test ({:.1f}pp)
+    - Large gap between train and test ({overfit_gap * 100:.1f}pp)
     - Performance varies significantly across seasons
     - In-sample results do not generalize
 
@@ -718,7 +722,7 @@ def part7_recommendations(results):
     4. Re-evaluate before any deployment
 
     Betting readiness: DO NOT DEPLOY
-""".format(conservative_acc * 100, overfit_gap * 100)
+"""
 
     print(recommendation)
 

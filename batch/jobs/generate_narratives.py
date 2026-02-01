@@ -6,10 +6,9 @@ Can be run for a specific match, matchweek, or all pending.
 
 import asyncio
 from datetime import datetime
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, and_
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
@@ -23,7 +22,7 @@ settings = get_settings()
 def generate_narrative_for_match(
     match_id: int,
     force: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """Generate narrative for a single match.
 
     Args:
@@ -195,7 +194,7 @@ def generate_pending_narratives(limit: int = 10) -> dict:
             if result:
                 generated += 1
         except Exception as e:
-            logger.error(f"Failed to generate narrative", match_id=analysis.match_id, error=str(e))
+            logger.error("Failed to generate narrative", match_id=analysis.match_id, error=str(e))
             failed += 1
 
     return {
@@ -205,7 +204,7 @@ def generate_pending_narratives(limit: int = 10) -> dict:
     }
 
 
-def _build_stats_dict(stats: Optional[TeamStats], is_home: bool) -> dict:
+def _build_stats_dict(stats: TeamStats | None, is_home: bool) -> dict:
     """Build stats dictionary for narrative prompt."""
     if not stats:
         return {"form": "N/A", "position": "N/A"}

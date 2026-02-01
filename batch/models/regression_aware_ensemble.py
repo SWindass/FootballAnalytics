@@ -8,11 +8,8 @@ When regression is likely, boosts xG model weight since it excels
 at identifying teams due for regression to the mean.
 """
 
-from dataclasses import dataclass, field
 from collections import defaultdict
-from typing import Optional
-
-import numpy as np
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -77,8 +74,8 @@ class RegressionAwareEnsemble:
         self,
         window: int = 10,
         regression_threshold: float = 0.25,
-        standard_weights: Optional[dict] = None,
-        regression_weights: Optional[dict] = None,
+        standard_weights: dict | None = None,
+        regression_weights: dict | None = None,
     ):
         self.window = window
         self.regression_threshold = regression_threshold

@@ -7,7 +7,6 @@ Run weekly to keep player stats, form, and availability up to date.
 import asyncio
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -16,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.database import SyncSessionLocal
 from app.db.models import Player, PlayerMatchPerformance, Team
-from batch.data_sources.fpl import FPLClient, parse_fpl_player, parse_fpl_match_performance
+from batch.data_sources.fpl import FPLClient, parse_fpl_match_performance, parse_fpl_player
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -50,7 +49,7 @@ FPL_TEAM_NAME_MAP = {
 class FPLSyncJob:
     """Syncs FPL player data to database."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.client = FPLClient()
         self._team_cache: dict[int, int] = {}  # FPL team_id -> our team_id

@@ -9,7 +9,6 @@ Runs every Monday at 9AM UTC to:
 
 import argparse
 from datetime import datetime
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -25,7 +24,7 @@ logger = structlog.get_logger()
 class WeeklyMonitoringJob:
     """Weekly strategy monitoring job."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.monitor = StrategyMonitor(self.session)
 

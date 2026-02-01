@@ -16,16 +16,15 @@ sys.path.insert(0, str(project_root))
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, Team
-
-from batch.models.pi_dixon_coles import PiDixonColesModel
-from batch.models.pi_rating import PiRating
-from batch.models.elo import EloRatingSystem, EloConfig
+from batch.models.elo import EloConfig, EloRatingSystem
 from batch.models.ensemble_predictor import (
     EnsemblePredictor,
-    optimize_ensemble_weights,
-    evaluate_ensemble,
     analyze_ensemble_vs_individuals,
+    evaluate_ensemble,
+    optimize_ensemble_weights,
 )
+from batch.models.pi_dixon_coles import PiDixonColesModel
+from batch.models.pi_rating import PiRating
 
 
 def load_matches(session, seasons=None):
@@ -379,7 +378,7 @@ def main():
 
     analysis = analyze_ensemble_vs_individuals(test_df, best_strategy[1])
 
-    print(f"\nModel Agreement Analysis:")
+    print("\nModel Agreement Analysis:")
     print(f"  All models agree & correct:     {analysis['all_agree_correct']:>6}")
     print(f"  All models agree & wrong:       {analysis['all_agree_wrong']:>6}")
     print(f"  Models disagree, ensemble right:{analysis['disagreement_ensemble_correct']:>6}")
@@ -456,7 +455,7 @@ def main():
     print(f"  Best Individual (Pi+DC): {best_individual_brier:.4f}")
 
     if best_results["draw_predictions"] > 0:
-        print(f"\nDraw Prediction Performance:")
+        print("\nDraw Prediction Performance:")
         print(f"  Predictions: {best_results['draw_predictions']}")
         print(f"  Correct: {best_results['draw_correct']}")
         print(f"  Precision: {best_results['draw_precision']:.1%}")

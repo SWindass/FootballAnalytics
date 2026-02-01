@@ -9,20 +9,19 @@ Run with: PYTHONPATH=. python batch/jobs/backfill_neural.py
 import argparse
 from collections import defaultdict
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, EloRating, TeamStats, Referee
+from app.db.models import EloRating, Match, MatchAnalysis, MatchStatus, Referee, TeamStats
 from batch.models.neural_stacker import NeuralStacker
 
 logger = structlog.get_logger()
 
 
 def backfill_with_neural_stacker(
-    season: Optional[str] = None,
+    season: str | None = None,
     dry_run: bool = False,
     batch_size: int = 500,
 ) -> dict:

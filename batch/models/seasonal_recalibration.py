@@ -11,8 +11,7 @@ which causes models to underestimate draws.
 """
 
 from collections import deque
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -87,7 +86,7 @@ class SeasonalRecalibration:
     def __init__(
         self,
         window_size: int = 50,
-        baseline: Optional[LeagueBaseline] = None,
+        baseline: LeagueBaseline | None = None,
         sensitivity: float = 1.0,
     ):
         self.window_size = window_size
@@ -220,7 +219,7 @@ class SeasonalRecalibration:
         home_prob: float,
         draw_prob: float,
         away_prob: float,
-        factors: Optional[RecalibrationFactors] = None,
+        factors: RecalibrationFactors | None = None,
     ) -> tuple[float, float, float]:
         """
         Apply recalibration factors to predicted probabilities.
@@ -264,7 +263,7 @@ class SeasonalRecalibration:
 
         return home_prob, draw_prob, away_prob
 
-    def adjust_rho(self, base_rho: float, factors: Optional[RecalibrationFactors] = None) -> float:
+    def adjust_rho(self, base_rho: float, factors: RecalibrationFactors | None = None) -> float:
         """
         Adjust Dixon-Coles rho parameter based on recent statistics.
 
@@ -293,7 +292,7 @@ class SeasonalRecalibration:
     def adjust_avg_goals(
         self,
         base_avg: float,
-        factors: Optional[RecalibrationFactors] = None,
+        factors: RecalibrationFactors | None = None,
     ) -> float:
         """
         Adjust league average goals based on recent statistics.
@@ -362,7 +361,7 @@ class ConservativeRecalibration(SeasonalRecalibration):
     def __init__(
         self,
         window_size: int = 50,
-        baseline: Optional[LeagueBaseline] = None,
+        baseline: LeagueBaseline | None = None,
     ):
         super().__init__(
             window_size=window_size,

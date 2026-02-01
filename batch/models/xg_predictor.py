@@ -13,8 +13,6 @@ Features:
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
 
 import numpy as np
 from scipy.stats import poisson
@@ -53,7 +51,7 @@ class XGMatchPrediction:
     away_prob: float
 
     # Score matrix for exact score probabilities
-    score_matrix: Optional[np.ndarray] = None
+    score_matrix: np.ndarray | None = None
 
     # Confidence metrics
     confidence: float = 0.0

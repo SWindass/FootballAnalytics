@@ -4,9 +4,8 @@ Generates predictions and narratives for the upcoming matchweek.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -22,7 +21,7 @@ from batch.models.consensus_stacker import ConsensusStacker
 from batch.models.elo import EloRatingSystem
 from batch.models.neural_stacker import NeuralStacker
 from batch.models.poisson import PoissonModel, calculate_team_strengths
-from batch.models.xgboost_model import MatchOutcomeClassifier, build_feature_dataframe
+from batch.models.xgboost_model import MatchOutcomeClassifier
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -31,7 +30,7 @@ settings = get_settings()
 class WeeklyAnalysisJob:
     """Generates weekly match analyses."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.elo = EloRatingSystem()
         self.poisson = PoissonModel()
@@ -128,7 +127,7 @@ class WeeklyAnalysisJob:
             self.session.rollback()
             raise
 
-    def _find_next_matchweek(self) -> Optional[int]:
+    def _find_next_matchweek(self) -> int | None:
         """Find the next matchweek with scheduled matches."""
         now = datetime.utcnow()
 
@@ -149,7 +148,7 @@ class WeeklyAnalysisJob:
         self,
         elo_probs: tuple[float, float, float],
         poisson_probs: tuple[float, float, float],
-        market_probs: Optional[tuple[float, float, float]],
+        market_probs: tuple[float, float, float] | None,
     ) -> float:
         """Calculate confidence based on model agreement.
 
@@ -192,7 +191,7 @@ class WeeklyAnalysisJob:
         consensus: tuple[float, float, float],
         elo_probs: tuple[float, float, float],
         poisson_probs: tuple[float, float, float],
-        market_probs: Optional[tuple[float, float, float]],
+        market_probs: tuple[float, float, float] | None,
     ) -> tuple[float, float, float]:
         """Adjust draw probability based on model agreement and match closeness.
 
@@ -313,7 +312,7 @@ class WeeklyAnalysisJob:
         ratings = result.scalars().all()
         return {r.team_id: r for r in ratings}
 
-    def _calculate_rest_days(self, team_id: int, match_date: datetime) -> Optional[int]:
+    def _calculate_rest_days(self, team_id: int, match_date: datetime) -> int | None:
         """Calculate days since team's last match.
 
         Args:
@@ -392,7 +391,7 @@ class WeeklyAnalysisJob:
         team_stats: dict[int, TeamStats],
         elo_ratings: dict[int, EloRating],
         poisson_strengths: dict[int, tuple[float, float]],
-    ) -> Optional[MatchAnalysis]:
+    ) -> MatchAnalysis | None:
         """Generate analysis for a single match."""
         home_id = match.home_team_id
         away_id = match.away_team_id
@@ -580,7 +579,7 @@ class WeeklyAnalysisJob:
         poisson_probs: tuple[float, float, float] = None,
         market_probs: tuple[float, float, float] = None,
         confidence: float = 0.0,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Generate AI narrative for a match with confidence analysis."""
         home_team = teams[match.home_team_id]
         away_team = teams[match.away_team_id]

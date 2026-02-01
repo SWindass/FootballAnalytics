@@ -11,7 +11,6 @@ Builds a sophisticated FPL-based predictor following:
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,10 +18,9 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.stats import poisson
 from sklearn.calibration import calibration_curve
-from sklearn.metrics import brier_score_loss, log_loss
+from sklearn.metrics import log_loss
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, Player, PlayerMatchPerformance, Team
 
 warnings.filterwarnings("ignore")
 
@@ -64,7 +62,7 @@ class FPLMatchPrediction:
     draw_prob: float
     away_prob: float
     confidence: float = 0.0
-    score_matrix: Optional[np.ndarray] = None
+    score_matrix: np.ndarray | None = None
 
 
 class EnhancedFPLPredictor:
@@ -138,7 +136,7 @@ class EnhancedFPLPredictor:
             clean_sheets = float(perf.get('clean_sheets', 0) or 0)
             minutes = float(perf.get('minutes', 0) or 0)
             influence = float(perf.get('influence', 0) or 0)
-            creativity = float(perf.get('creativity', 0) or 0)
+            float(perf.get('creativity', 0) or 0)
             threat = float(perf.get('threat', 0) or 0)
             xg = float(perf.get('expected_goals', 0) or 0)
 
@@ -171,9 +169,9 @@ class EnhancedFPLPredictor:
             'attack_xg': [], 'attack_threat': []
         })
 
-        for team, seasons in self._team_data.items():
+        for _team, seasons in self._team_data.items():
             for season, gws in seasons.items():
-                for gw, metrics in gws.items():
+                for _gw, metrics in gws.items():
                     if metrics.player_count > 0:
                         season_data[season]['attack_fpl'].append(metrics.attack_fpl)
                         season_data[season]['defense_fpl'].append(metrics.defense_fpl)
@@ -520,9 +518,10 @@ def build_base_predictions(matches_df: pd.DataFrame, warmup: int = 500) -> dict[
     Returns dict[match_id] -> {model predictions}
     """
     import math
-    from batch.models.elo import EloRatingSystem, EloConfig
-    from batch.models.pi_rating import PiRating
+
+    from batch.models.elo import EloConfig, EloRatingSystem
     from batch.models.pi_dixon_coles import PiDixonColesModel
+    from batch.models.pi_rating import PiRating
 
     print("\nBuilding base model predictions...")
 
@@ -590,7 +589,7 @@ def build_base_predictions(matches_df: pd.DataFrame, warmup: int = 500) -> dict[
                         'away_prob': pidc_pred.away_win,
                     },
                 }
-        except Exception as e:
+        except Exception:
             pass
 
         # Update models with actual result
@@ -645,13 +644,10 @@ def evaluate_models(
         # Actual outcome
         if row['home_score'] > row['away_score']:
             actual = 'H'
-            actual_vec = [1, 0, 0]
         elif row['home_score'] == row['away_score']:
             actual = 'D'
-            actual_vec = [0, 1, 0]
         else:
             actual = 'A'
-            actual_vec = [0, 0, 1]
 
         results.append({
             'match_id': match_id,
@@ -688,11 +684,13 @@ def evaluate_models(
 
 def optimize_ensemble_weights(
     results_df: pd.DataFrame,
-    models: list[str] = ['pidc', 'elo', 'pi', 'fpl'],
+    models: list[str] = None,
 ) -> dict[str, float]:
     """
     Optimize ensemble weights using Brier score.
     """
+    if models is None:
+        models = ['pidc', 'elo', 'pi', 'fpl']
     n_models = len(models)
 
     def ensemble_brier(weights):
@@ -703,9 +701,9 @@ def optimize_ensemble_weights(
 
         for _, row in results_df.iterrows():
             # Weighted average predictions
-            home_prob = sum(w * row[f'{m}_home'] for w, m in zip(weights, models))
-            draw_prob = sum(w * row[f'{m}_draw'] for w, m in zip(weights, models))
-            away_prob = sum(w * row[f'{m}_away'] for w, m in zip(weights, models))
+            home_prob = sum(w * row[f'{m}_home'] for w, m in zip(weights, models, strict=False))
+            draw_prob = sum(w * row[f'{m}_draw'] for w, m in zip(weights, models, strict=False))
+            away_prob = sum(w * row[f'{m}_away'] for w, m in zip(weights, models, strict=False))
 
             # Normalize
             total = home_prob + draw_prob + away_prob
@@ -747,7 +745,7 @@ def optimize_ensemble_weights(
     weights = np.array(result.x)
     weights = weights / weights.sum()
 
-    return {m: w for m, w in zip(models, weights)}
+    return dict(zip(models, weights, strict=False))
 
 
 def calculate_metrics(
@@ -888,13 +886,13 @@ def analyze_fpl_performance(results_df: pd.DataFrame):
         elif pidc_brier < fpl_brier:
             pidc_better += 1
 
-    print(f"\nMatch-by-match comparison (FPL vs Pi+DC):")
+    print("\nMatch-by-match comparison (FPL vs Pi+DC):")
     print(f"  FPL better:  {fpl_better} ({fpl_better/len(results_df)*100:.1f}%)")
     print(f"  Pi+DC better: {pidc_better} ({pidc_better/len(results_df)*100:.1f}%)")
     print(f"  Equal:       {len(results_df) - fpl_better - pidc_better}")
 
     # FPL xG correlation with actual goals
-    print(f"\nFPL xG correlation with actual goals:")
+    print("\nFPL xG correlation with actual goals:")
     home_xg_corr = np.corrcoef(results_df['fpl_home_xg'], results_df['home_score'])[0, 1]
     away_xg_corr = np.corrcoef(results_df['fpl_away_xg'], results_df['away_score'])[0, 1]
     total_xg = results_df['fpl_home_xg'] + results_df['fpl_away_xg']
@@ -906,7 +904,7 @@ def analyze_fpl_performance(results_df: pd.DataFrame):
     print(f"  Total xG correlation: {total_xg_corr:.3f}")
 
     # Analyze by form differential
-    print(f"\nPerformance by FPL confidence:")
+    print("\nPerformance by FPL confidence:")
     conf_bins = [(0, 0.5), (0.5, 0.75), (0.75, 1.0)]
 
     for low, high in conf_bins:
@@ -927,7 +925,7 @@ def plot_calibration(results_df: pd.DataFrame, save_path: str = None):
     outcomes = ['home', 'draw', 'away']
     outcome_names = ['Home Win', 'Draw', 'Away Win']
 
-    for ax, outcome, name in zip(axes, outcomes, outcome_names):
+    for ax, outcome, name in zip(axes, outcomes, outcome_names, strict=False):
         # Actual outcome
         y_true = (results_df['actual'] == outcome[0].upper()).astype(int)
 
@@ -1034,7 +1032,7 @@ def main():
     print(f"\n{'Model':<15} {'Accuracy':>10} {'Brier':>10} {'Log Loss':>10} {'Draw Prec':>10} {'Draw Rec':>10}")
     print("-" * 75)
 
-    for model, name in zip(models, model_names):
+    for model, name in zip(models, model_names, strict=False):
         metrics = calculate_metrics(results_df, model)
         print(f"{name:<15} {metrics['accuracy']*100:>9.1f}% {metrics['brier']:>10.4f} "
               f"{metrics['logloss']:>10.4f} {metrics['draw_precision']*100:>9.1f}% "
@@ -1051,13 +1049,13 @@ def main():
     )
 
     weights_3model = optimize_ensemble_weights(train_results, ['pidc', 'elo', 'pi'])
-    print(f"\n3-Model Ensemble Weights (Pi+DC, ELO, Pi):")
+    print("\n3-Model Ensemble Weights (Pi+DC, ELO, Pi):")
     for m, w in weights_3model.items():
         print(f"  {m}: {w*100:.1f}%")
 
     # 4-model ensemble (with FPL)
     weights_4model = optimize_ensemble_weights(train_results, ['pidc', 'elo', 'pi', 'fpl'])
-    print(f"\n4-Model Ensemble Weights (Pi+DC, ELO, Pi, FPL):")
+    print("\n4-Model Ensemble Weights (Pi+DC, ELO, Pi, FPL):")
     for m, w in weights_4model.items():
         print(f"  {m}: {w*100:.1f}%")
 
@@ -1086,7 +1084,7 @@ def main():
     brier_improvement = (ens3_metrics['brier'] - ens4_metrics['brier']) / ens3_metrics['brier'] * 100
     acc_improvement = (ens4_metrics['accuracy'] - ens3_metrics['accuracy']) * 100
 
-    print(f"\nFPL Contribution:")
+    print("\nFPL Contribution:")
     print(f"  Brier improvement: {brier_improvement:+.2f}%")
     print(f"  Accuracy improvement: {acc_improvement:+.2f}pp")
 

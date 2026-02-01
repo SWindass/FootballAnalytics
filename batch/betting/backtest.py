@@ -11,19 +11,21 @@ Success criteria:
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
-from typing import Optional
 
-import numpy as np
 import structlog
 from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
 from app.db.models import (
-    Match, MatchAnalysis, MatchStatus, EloRating, TeamStats,
-    OddsHistory, Team,
+    EloRating,
+    Match,
+    MatchAnalysis,
+    MatchStatus,
+    OddsHistory,
+    Team,
+    TeamStats,
 )
-from batch.betting.value_detector import ValueDetector, ValueDetectorConfig, ValueBetOpportunity
+from batch.betting.value_detector import ValueDetector, ValueDetectorConfig
 from batch.models.meta_model import MetaModel
 
 logger = structlog.get_logger()
@@ -52,7 +54,7 @@ class BetResult:
     profit: float  # stake * (odds - 1) if won, -stake if lost
 
     # Meta-model
-    meta_confidence: Optional[float] = None
+    meta_confidence: float | None = None
 
 
 @dataclass
@@ -121,8 +123,8 @@ class Backtester:
 
     def __init__(
         self,
-        detector: Optional[ValueDetector] = None,
-        meta_model: Optional[MetaModel] = None,
+        detector: ValueDetector | None = None,
+        meta_model: MetaModel | None = None,
         use_meta_model: bool = True,
         meta_min_confidence: float = 0.55,
         base_stake: float = 10.0,

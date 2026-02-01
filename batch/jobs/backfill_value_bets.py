@@ -10,15 +10,20 @@ This allows viewing value bet performance across all historical seasons.
 import argparse
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, func, delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
 from app.db.models import (
-    Match, MatchAnalysis, MatchStatus, OddsHistory, ValueBet, BetOutcome, TeamStats,
+    BetOutcome,
+    Match,
+    MatchAnalysis,
+    MatchStatus,
+    OddsHistory,
+    TeamStats,
+    ValueBet,
 )
 
 logger = structlog.get_logger()
@@ -27,7 +32,7 @@ logger = structlog.get_logger()
 class ValueBetBackfill:
     """Backfills value bets for historical matches."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
 
         # Proven profitable strategies from backtest (2020-2025):

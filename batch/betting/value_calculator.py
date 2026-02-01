@@ -8,7 +8,6 @@ Calibrated based on backtest results:
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Optional
 
 from app.core.config import get_settings
 from batch.betting.kelly_criterion import KellyCalculator, KellyConfig
@@ -42,7 +41,7 @@ def calibrate_probability(model_prob: float) -> float:
 
             # Get next bucket's actual rate for interpolation
             next_actual = actual
-            for (next_min, next_max), next_rate in CALIBRATION_MAP.items():
+            for (next_min, _next_max), next_rate in CALIBRATION_MAP.items():
                 if next_min == max_conf:
                     next_actual = next_rate
                     break
@@ -101,7 +100,7 @@ class ValueBetDetector:
     - Home wins at high confidence are most profitable
     """
 
-    def __init__(self, config: Optional[ValueBetConfig] = None):
+    def __init__(self, config: ValueBetConfig | None = None):
         self.config = config or ValueBetConfig()
         self.kelly = KellyCalculator(
             KellyConfig(
@@ -194,9 +193,9 @@ class ValueBetDetector:
 
 
 def calculate_consensus_probabilities(
-    elo_probs: Optional[tuple[float, float, float]],
-    poisson_probs: Optional[tuple[float, float, float]],
-    xgboost_probs: Optional[tuple[float, float, float]],
+    elo_probs: tuple[float, float, float] | None,
+    poisson_probs: tuple[float, float, float] | None,
+    xgboost_probs: tuple[float, float, float] | None,
     weights: tuple[float, float, float] = (0.3, 0.35, 0.35),
 ) -> tuple[float, float, float]:
     """Calculate weighted average consensus probabilities.
@@ -214,7 +213,7 @@ def calculate_consensus_probabilities(
     all_weights = list(weights)
 
     # Filter out None values
-    available = [(p, w) for p, w in zip(all_probs, all_weights) if p is not None]
+    available = [(p, w) for p, w in zip(all_probs, all_weights, strict=False) if p is not None]
 
     if not available:
         return (0.33, 0.34, 0.33)  # Default uniform

@@ -6,7 +6,7 @@ Provides logging-based alerts with extensibility for Slack/email notifications.
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -48,7 +48,7 @@ class AlertManager:
     - Custom webhooks
     """
 
-    def __init__(self, enable_slack: bool = False, slack_webhook: Optional[str] = None):
+    def __init__(self, enable_slack: bool = False, slack_webhook: str | None = None):
         """Initialize alert manager.
 
         Args:
@@ -191,7 +191,7 @@ class AlertManager:
         pass
 
     def get_recent_alerts(
-        self, limit: int = 10, alert_type: Optional[AlertType] = None
+        self, limit: int = 10, alert_type: AlertType | None = None
     ) -> list[Alert]:
         """Get recent alerts from history.
 

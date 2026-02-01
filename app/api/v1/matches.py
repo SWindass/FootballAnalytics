@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -9,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.api.v1.matchweek import build_match_detail
 from app.core.config import get_settings
 from app.db.database import get_async_session
-from app.db.models import Match, Team
+from app.db.models import Match
 from app.schemas.match import MatchDetailResponse, MatchResponse
 
 router = APIRouter()
@@ -44,10 +43,10 @@ async def get_match(
 
 @router.get("/matches", response_model=list[MatchResponse])
 async def list_matches(
-    season: Optional[str] = Query(default=None),
-    matchweek: Optional[int] = Query(default=None, ge=1, le=38),
-    team_id: Optional[int] = Query(default=None),
-    status: Optional[str] = Query(default=None),
+    season: str | None = Query(default=None),
+    matchweek: int | None = Query(default=None, ge=1, le=38),
+    team_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
     limit: int = Query(default=50, le=100),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_async_session),

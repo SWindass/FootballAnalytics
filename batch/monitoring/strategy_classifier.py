@@ -4,14 +4,12 @@ Classifies value bets into strategies based on outcome type, edge ranges,
 odds ranges, and form filters defined in the strategy parameters.
 """
 
-from decimal import Decimal
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import BettingStrategy, ValueBet, Match, TeamStats, StrategyStatus
+from app.db.models import BettingStrategy, Match, StrategyStatus, TeamStats, ValueBet
 
 logger = structlog.get_logger()
 
@@ -36,8 +34,8 @@ class StrategyClassifier:
     def classify_bet(
         self,
         value_bet: ValueBet,
-        home_form: Optional[int] = None,
-    ) -> Optional[int]:
+        home_form: int | None = None,
+    ) -> int | None:
         """Classify a value bet into a strategy.
 
         Args:
@@ -63,7 +61,7 @@ class StrategyClassifier:
         outcome: str,
         edge: float,
         odds: float,
-        home_form: Optional[int],
+        home_form: int | None,
     ) -> bool:
         """Check if a bet matches a strategy's criteria.
 
@@ -120,7 +118,7 @@ class StrategyClassifier:
 
         return True
 
-    def get_home_form_for_match(self, match: Match) -> Optional[int]:
+    def get_home_form_for_match(self, match: Match) -> int | None:
         """Get home team's form points for a match.
 
         Args:
@@ -139,7 +137,7 @@ class StrategyClassifier:
         stats = self.session.execute(stmt).scalar_one_or_none()
         return stats.form_points if stats else None
 
-    def classify_and_assign(self, value_bet: ValueBet) -> Optional[int]:
+    def classify_and_assign(self, value_bet: ValueBet) -> int | None:
         """Classify a bet and assign strategy_id.
 
         This is a convenience method that gets home form and classifies the bet.

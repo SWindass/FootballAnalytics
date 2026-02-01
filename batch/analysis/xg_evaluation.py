@@ -15,14 +15,13 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from sklearn.metrics import log_loss
-
 from sqlalchemy import text
 
 from app.db.database import SyncSessionLocal
-from batch.models.xg_predictor import XGPredictor
-from batch.models.elo import EloRatingSystem, EloConfig
-from batch.models.pi_rating import PiRating
+from batch.models.elo import EloConfig, EloRatingSystem
 from batch.models.pi_dixon_coles import PiDixonColesModel
+from batch.models.pi_rating import PiRating
+from batch.models.xg_predictor import XGPredictor
 
 warnings.filterwarnings("ignore")
 
@@ -176,7 +175,7 @@ def generate_all_predictions(matches: list[dict], warmup: int = 380):
                     'elo_away': elo_a,
                 })
 
-        except Exception as e:
+        except Exception:
             pass
 
         # Update all models with actual result
@@ -275,9 +274,9 @@ def optimize_ensemble_weights(df: pd.DataFrame, models: list[str]) -> dict[str, 
         total_brier = 0.0
 
         for _, row in df.iterrows():
-            home_prob = sum(w * row[f'{m}_home'] for w, m in zip(weights, models))
-            draw_prob = sum(w * row[f'{m}_draw'] for w, m in zip(weights, models))
-            away_prob = sum(w * row[f'{m}_away'] for w, m in zip(weights, models))
+            home_prob = sum(w * row[f'{m}_home'] for w, m in zip(weights, models, strict=False))
+            draw_prob = sum(w * row[f'{m}_draw'] for w, m in zip(weights, models, strict=False))
+            away_prob = sum(w * row[f'{m}_away'] for w, m in zip(weights, models, strict=False))
 
             total = home_prob + draw_prob + away_prob
             home_prob /= total
@@ -315,7 +314,7 @@ def optimize_ensemble_weights(df: pd.DataFrame, models: list[str]) -> dict[str, 
     weights = np.array(result.x)
     weights = weights / weights.sum()
 
-    return {m: w for m, w in zip(models, weights)}
+    return dict(zip(models, weights, strict=False))
 
 
 def add_ensemble_predictions(df: pd.DataFrame, weights: dict, prefix: str) -> pd.DataFrame:
@@ -388,7 +387,7 @@ def analyze_xg_performance(df: pd.DataFrame):
         elif pidc_brier < xg_brier:
             pidc_better += 1
 
-    print(f"\nMatch-by-match comparison (xG vs Pi+DC):")
+    print("\nMatch-by-match comparison (xG vs Pi+DC):")
     print(f"  xG better:   {xg_better} ({xg_better/len(df)*100:.1f}%)")
     print(f"  Pi+DC better: {pidc_better} ({pidc_better/len(df)*100:.1f}%)")
 
@@ -447,7 +446,7 @@ def main():
     print(f"\n{'Model':<15} {'Accuracy':>10} {'Brier':>10} {'Log Loss':>10} {'Draw P':>10} {'Draw R':>10}")
     print("-" * 75)
 
-    for model, name in zip(models, model_names):
+    for model, name in zip(models, model_names, strict=False):
         metrics = calculate_metrics(test_df, model)
         print(f"{name:<15} {metrics['accuracy']*100:>9.1f}% {metrics['brier']:>10.4f} "
               f"{metrics['logloss']:>10.4f} {metrics['draw_precision']*100:>9.1f}% "
@@ -460,13 +459,13 @@ def main():
 
     # 3-model ensemble (without xG)
     weights_3model = optimize_ensemble_weights(train_df, ['pidc', 'elo', 'pi'])
-    print(f"\n3-Model Ensemble (Pi+DC, ELO, Pi):")
+    print("\n3-Model Ensemble (Pi+DC, ELO, Pi):")
     for m, w in weights_3model.items():
         print(f"  {m}: {w*100:.1f}%")
 
     # 4-model ensemble (with xG)
     weights_4model = optimize_ensemble_weights(train_df, ['xg', 'pidc', 'elo', 'pi'])
-    print(f"\n4-Model Ensemble (+xG):")
+    print("\n4-Model Ensemble (+xG):")
     for m, w in weights_4model.items():
         print(f"  {m}: {w*100:.1f}%")
 
@@ -493,7 +492,7 @@ def main():
     brier_improvement = (ens3_metrics['brier'] - ens4_metrics['brier']) / ens3_metrics['brier'] * 100
     acc_improvement = (ens4_metrics['accuracy'] - ens3_metrics['accuracy']) * 100
 
-    print(f"\nxG Contribution:")
+    print("\nxG Contribution:")
     print(f"  Brier improvement: {brier_improvement:+.2f}%")
     print(f"  Accuracy improvement: {acc_improvement:+.2f}pp")
 

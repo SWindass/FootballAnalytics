@@ -13,14 +13,12 @@ Sources:
 """
 
 import asyncio
-from datetime import datetime, timedelta
-from typing import Optional
 from dataclasses import dataclass
-from decimal import Decimal
+from datetime import datetime, timedelta
 
 import structlog
 
-from batch.data_sources.the_odds_api import OddsApiClient, parse_odds
+from batch.data_sources.the_odds_api import OddsApiClient
 
 logger = structlog.get_logger()
 
@@ -34,9 +32,9 @@ class ExternalPrediction:
     home_prob: float
     draw_prob: float
     away_prob: float
-    match_date: Optional[datetime] = None
-    confidence: Optional[float] = None
-    raw_data: Optional[dict] = None
+    match_date: datetime | None = None
+    confidence: float | None = None
+    raw_data: dict | None = None
 
 
 def decimal_odds_to_probability(odds: float) -> float:
@@ -103,7 +101,7 @@ class MarketConsensusPredictor:
     def __init__(self):
         self.odds_client = OddsApiClient()
         self._cache: dict[str, list[ExternalPrediction]] = {}
-        self._cache_time: Optional[datetime] = None
+        self._cache_time: datetime | None = None
         self._cache_duration = timedelta(hours=1)  # Odds change frequently
 
     def _normalize_team_name(self, name: str) -> str:
@@ -246,7 +244,7 @@ class TipsterAggregator:
     def __init__(self):
         self.market_predictor = MarketConsensusPredictor()
         self.weights = self.DEFAULT_WEIGHTS.copy()
-        self._market_predictions: Optional[list[ExternalPrediction]] = None
+        self._market_predictions: list[ExternalPrediction] | None = None
 
     async def load_market_predictions(self) -> None:
         """Pre-load market predictions to avoid repeated API calls."""
@@ -256,8 +254,8 @@ class TipsterAggregator:
         self,
         home_team: str,
         away_team: str,
-        internal_elo_probs: Optional[tuple[float, float, float]] = None,
-        internal_poisson_probs: Optional[tuple[float, float, float]] = None,
+        internal_elo_probs: tuple[float, float, float] | None = None,
+        internal_poisson_probs: tuple[float, float, float] | None = None,
     ) -> tuple[float, float, float]:
         """Get aggregated prediction combining external and internal sources.
 
@@ -303,9 +301,9 @@ class TipsterAggregator:
 
         # Weighted average
         total_weight = sum(weights)
-        home_prob = sum(p[0] * w for p, w in zip(predictions, weights)) / total_weight
-        draw_prob = sum(p[1] * w for p, w in zip(predictions, weights)) / total_weight
-        away_prob = sum(p[2] * w for p, w in zip(predictions, weights)) / total_weight
+        home_prob = sum(p[0] * w for p, w in zip(predictions, weights, strict=False)) / total_weight
+        draw_prob = sum(p[1] * w for p, w in zip(predictions, weights, strict=False)) / total_weight
+        away_prob = sum(p[2] * w for p, w in zip(predictions, weights, strict=False)) / total_weight
 
         # Normalize to ensure sum = 1
         total = home_prob + draw_prob + away_prob

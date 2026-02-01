@@ -6,10 +6,8 @@ has significantly degraded from its historical baseline.
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
 
 import numpy as np
-from scipy import stats
 import structlog
 
 logger = structlog.get_logger()
@@ -22,7 +20,7 @@ class DriftResult:
     z_score: float
     cusum_statistic: float
     is_drift_detected: bool
-    drift_type: Optional[str] = None  # "sudden" or "gradual"
+    drift_type: str | None = None  # "sudden" or "gradual"
     confidence: float = 0.0
 
 
@@ -231,7 +229,7 @@ class DriftDetector:
 
         # Normalize recent results for CUSUM
         recent_normalized = []
-        for pl, odds in recent:
+        for pl, _odds in recent:
             # Normalize to standard bet size
             # Win: profit / stake = odds - 1
             # Loss: -1 (lost stake)

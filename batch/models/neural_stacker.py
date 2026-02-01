@@ -4,23 +4,29 @@ Takes predictions from ELO, Poisson, and XGBoost models plus additional
 features and learns the optimal way to combine them.
 """
 
-import os
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+
 import numpy as np
+import structlog
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-from pathlib import Path
-from typing import Optional
-from datetime import datetime, timezone
-from decimal import Decimal
-
-import structlog
 from sqlalchemy import select
+from torch.utils.data import DataLoader, TensorDataset
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, MatchAnalysis, MatchStatus, EloRating, TeamStats, Referee, TeamFixture
+from app.db.models import (
+    EloRating,
+    Match,
+    MatchAnalysis,
+    MatchStatus,
+    Referee,
+    TeamFixture,
+    TeamStats,
+)
 
 logger = structlog.get_logger()
 
@@ -42,7 +48,9 @@ class MatchPredictorNet(nn.Module):
     - Output: Softmax probabilities for home/draw/away
     """
 
-    def __init__(self, input_size: int = 15, hidden_sizes: list = [64, 32], dropout: float = 0.3):
+    def __init__(self, input_size: int = 15, hidden_sizes: list = None, dropout: float = 0.3):
+        if hidden_sizes is None:
+            hidden_sizes = [64, 32]
         super().__init__()
 
         layers = []
@@ -160,8 +168,10 @@ class NeuralStacker:
         """Ensure model directory exists."""
         MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    def build_model(self, hidden_sizes: list = [64, 32], dropout: float = 0.3):
+    def build_model(self, hidden_sizes: list = None, dropout: float = 0.3):
         """Build a new model."""
+        if hidden_sizes is None:
+            hidden_sizes = [64, 32]
         self.model = MatchPredictorNet(
             input_size=self.input_size,
             hidden_sizes=hidden_sizes,
@@ -214,7 +224,7 @@ class NeuralStacker:
 
         if metadata is None:
             metadata = {}
-        metadata["saved_at"] = datetime.now(timezone.utc).isoformat()
+        metadata["saved_at"] = datetime.now(UTC).isoformat()
         metadata["model_version"] = MODEL_VERSION
         metadata["input_size"] = self.input_size
         metadata["features"] = self.FEATURE_NAMES
@@ -510,23 +520,23 @@ class NeuralStacker:
     def _build_feature_vector(
         self,
         analysis: MatchAnalysis,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
-        referee: Optional[Referee] = None,
-        home_rest_days: Optional[int] = None,
-        away_rest_days: Optional[int] = None,
-        home_team_id: Optional[int] = None,
-        away_team_id: Optional[int] = None,
-        home_prev_fixture: Optional[TeamFixture] = None,
-        away_prev_fixture: Optional[TeamFixture] = None,
-        h2h_features: Optional[tuple[float, float, float]] = None,
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
+        referee: Referee | None = None,
+        home_rest_days: int | None = None,
+        away_rest_days: int | None = None,
+        home_team_id: int | None = None,
+        away_team_id: int | None = None,
+        home_prev_fixture: TeamFixture | None = None,
+        away_prev_fixture: TeamFixture | None = None,
+        h2h_features: tuple[float, float, float] | None = None,
         home_home_ppg: float = 0.5,
         away_away_ppg: float = 0.5,
-        home_recency: Optional[tuple[float, float]] = None,
-        away_recency: Optional[tuple[float, float]] = None,
-    ) -> Optional[list]:
+        home_recency: tuple[float, float] | None = None,
+        away_recency: tuple[float, float] | None = None,
+    ) -> list | None:
         """Build feature vector for a match.
 
         Extended features include injuries, manager status, referee bias, H2H, venue form, and recency.
@@ -719,7 +729,7 @@ class NeuralStacker:
         session,
         team_id: int,
         match_date: datetime,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Calculate days since team's last match.
 
         Uses TeamFixture table which includes all competitions (PL, CL, etc.)
@@ -1084,22 +1094,22 @@ class NeuralStacker:
     def predict(
         self,
         analysis: MatchAnalysis,
-        home_stats: Optional[TeamStats] = None,
-        away_stats: Optional[TeamStats] = None,
-        home_elo: Optional[EloRating] = None,
-        away_elo: Optional[EloRating] = None,
-        referee: Optional[Referee] = None,
-        home_rest_days: Optional[int] = None,
-        away_rest_days: Optional[int] = None,
-        home_team_id: Optional[int] = None,
-        away_team_id: Optional[int] = None,
-        home_prev_fixture: Optional[TeamFixture] = None,
-        away_prev_fixture: Optional[TeamFixture] = None,
-        h2h_features: Optional[tuple[float, float, float]] = None,
+        home_stats: TeamStats | None = None,
+        away_stats: TeamStats | None = None,
+        home_elo: EloRating | None = None,
+        away_elo: EloRating | None = None,
+        referee: Referee | None = None,
+        home_rest_days: int | None = None,
+        away_rest_days: int | None = None,
+        home_team_id: int | None = None,
+        away_team_id: int | None = None,
+        home_prev_fixture: TeamFixture | None = None,
+        away_prev_fixture: TeamFixture | None = None,
+        h2h_features: tuple[float, float, float] | None = None,
         home_home_ppg: float = 0.5,
         away_away_ppg: float = 0.5,
-        home_recency: Optional[tuple[float, float]] = None,
-        away_recency: Optional[tuple[float, float]] = None,
+        home_recency: tuple[float, float] | None = None,
+        away_recency: tuple[float, float] | None = None,
     ) -> tuple[float, float, float]:
         """Predict match probabilities.
 
@@ -1168,7 +1178,7 @@ class NeuralStacker:
                     hist_odds.get("implied_away_prob", 0.33),
                 )
                 # 40% neural network, 60% market odds - market is more reliable
-                probs = tuple(0.4 * n + 0.6 * m for n, m in zip(probs, market_probs))
+                probs = tuple(0.4 * n + 0.6 * m for n, m in zip(probs, market_probs, strict=False))
                 # Normalize
                 total = sum(probs)
                 probs = tuple(p / total for p in probs)
@@ -1232,10 +1242,10 @@ class NeuralStacker:
 
     def _is_cold_start(
         self,
-        home_stats: Optional[TeamStats],
-        away_stats: Optional[TeamStats],
-        home_elo: Optional[EloRating],
-        away_elo: Optional[EloRating],
+        home_stats: TeamStats | None,
+        away_stats: TeamStats | None,
+        home_elo: EloRating | None,
+        away_elo: EloRating | None,
     ) -> bool:
         """Detect if this is a cold start situation (early season with limited form data).
 
@@ -1254,7 +1264,7 @@ class NeuralStacker:
             return True
 
         # Calculate games played from win/draw/loss records
-        def get_games_played(stats: Optional[TeamStats]) -> int:
+        def get_games_played(stats: TeamStats | None) -> int:
             if stats is None:
                 return 0
             return (
@@ -1363,7 +1373,7 @@ def train_xgboost_stacker():
 
     # Feature importance
     importance = model.feature_importances_
-    feature_importance = list(zip(stacker.FEATURE_NAMES, importance))
+    feature_importance = list(zip(stacker.FEATURE_NAMES, importance, strict=False))
     feature_importance.sort(key=lambda x: x[1], reverse=True)
 
     print("\nTop 10 most important features:")
@@ -1387,12 +1397,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--xgboost":
         print("Training XGBoost Stacker...")
         metrics = train_xgboost_stacker()
-        print(f"\nXGBoost training complete:")
+        print("\nXGBoost training complete:")
         print(f"  Validation accuracy: {metrics['val_acc']:.1%}")
     else:
         print("Training Neural Stacker...")
         metrics = train_neural_stacker()
-        print(f"\nTraining complete:")
+        print("\nTraining complete:")
         print(f"  Best validation accuracy: {metrics['best_val_acc']:.1%}")
         print(f"  Training samples: {metrics['train_samples']}")
         print(f"  Validation samples: {metrics['val_samples']}")

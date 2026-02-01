@@ -5,7 +5,6 @@ This job runs before weekly analysis to ensure all contextual data is fresh.
 
 import asyncio
 from datetime import datetime
-from typing import Optional
 
 import structlog
 from sqlalchemy import select
@@ -24,7 +23,7 @@ settings = get_settings()
 class TeamContextUpdateJob:
     """Updates team context data including injuries and manager info."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.football_client = FootballDataClient()
 

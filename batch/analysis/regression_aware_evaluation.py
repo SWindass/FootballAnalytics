@@ -7,21 +7,19 @@ when teams are over/underperforming their xG.
 
 import math
 import warnings
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from sklearn.metrics import log_loss
-
 from sqlalchemy import text
 
 from app.db.database import SyncSessionLocal
-from batch.models.xg_predictor import XGPredictor
-from batch.models.regression_aware_ensemble import RegressionAwareEnsemble
-from batch.models.elo import EloRatingSystem, EloConfig
-from batch.models.pi_rating import PiRating
+from batch.models.elo import EloConfig, EloRatingSystem
 from batch.models.pi_dixon_coles import PiDixonColesModel
+from batch.models.pi_rating import PiRating
+from batch.models.regression_aware_ensemble import RegressionAwareEnsemble
+from batch.models.xg_predictor import XGPredictor
 
 warnings.filterwarnings("ignore")
 
@@ -187,7 +185,7 @@ def generate_predictions(matches: list[dict], warmup: int = 380):
                     'away_defense_luck': reg_pred.away_defense_luck,
                 })
 
-        except Exception as e:
+        except Exception:
             pass
 
         # Update all models
@@ -262,8 +260,8 @@ def optimize_regression_weights(df: pd.DataFrame) -> tuple[dict, dict]:
     """
     Optimize weights separately for regression and non-regression matches.
     """
-    regression_df = df[df['regression_boost'] == True]
-    normal_df = df[df['regression_boost'] == False]
+    regression_df = df[df['regression_boost']]
+    normal_df = df[not df['regression_boost']]
 
     models = ['xg', 'pidc', 'elo', 'pi']
 
@@ -274,9 +272,9 @@ def optimize_regression_weights(df: pd.DataFrame) -> tuple[dict, dict]:
 
             total_brier = 0.0
             for _, row in subset_df.iterrows():
-                home_prob = sum(w * row[f'{m}_home'] for w, m in zip(weights, models))
-                draw_prob = sum(w * row[f'{m}_draw'] for w, m in zip(weights, models))
-                away_prob = sum(w * row[f'{m}_away'] for w, m in zip(weights, models))
+                home_prob = sum(w * row[f'{m}_home'] for w, m in zip(weights, models, strict=False))
+                draw_prob = sum(w * row[f'{m}_draw'] for w, m in zip(weights, models, strict=False))
+                away_prob = sum(w * row[f'{m}_away'] for w, m in zip(weights, models, strict=False))
 
                 total = home_prob + draw_prob + away_prob
                 home_prob /= total
@@ -292,7 +290,7 @@ def optimize_regression_weights(df: pd.DataFrame) -> tuple[dict, dict]:
                     actual[2] = 1
 
                 brier = sum((p - a) ** 2 for p, a in zip(
-                    [home_prob, draw_prob, away_prob], actual
+                    [home_prob, draw_prob, away_prob], actual, strict=False
                 )) / 3
                 total_brier += brier
 
@@ -307,7 +305,7 @@ def optimize_regression_weights(df: pd.DataFrame) -> tuple[dict, dict]:
 
         weights = np.array(result.x)
         weights = weights / weights.sum()
-        return {m: w for m, w in zip(models, weights)}
+        return dict(zip(models, weights, strict=False))
 
     print("\nOptimizing weights for regression matches...")
     reg_weights = optimize_weights(regression_df) if len(regression_df) > 50 else None
@@ -346,7 +344,7 @@ def main():
     regression_count = test_df['regression_boost'].sum()
     normal_count = len(test_df) - regression_count
 
-    print(f"\nTest set breakdown:")
+    print("\nTest set breakdown:")
     print(f"  Regression matches: {regression_count} ({regression_count/len(test_df)*100:.1f}%)")
     print(f"  Normal matches:     {normal_count} ({normal_count/len(test_df)*100:.1f}%)")
 
@@ -370,8 +368,8 @@ def main():
     print("PERFORMANCE BY MATCH TYPE")
     print("=" * 80)
 
-    regression_df = test_df[test_df['regression_boost'] == True]
-    normal_df = test_df[test_df['regression_boost'] == False]
+    regression_df = test_df[test_df['regression_boost']]
+    normal_df = test_df[not test_df['regression_boost']]
 
     print(f"\n--- REGRESSION MATCHES (n={len(regression_df)}) ---")
     if len(regression_df) > 0:
@@ -402,18 +400,18 @@ def main():
     print("OPTIMIZED WEIGHTS BY MATCH TYPE")
     print("=" * 80)
 
-    train_regression = train_df[train_df['regression_boost'] == True]
-    train_normal = train_df[train_df['regression_boost'] == False]
+    train_df[train_df['regression_boost']]
+    train_df[not train_df['regression_boost']]
 
     opt_reg_weights, opt_norm_weights = optimize_regression_weights(train_df)
 
     if opt_reg_weights:
-        print(f"\nOptimal weights for REGRESSION matches:")
+        print("\nOptimal weights for REGRESSION matches:")
         for m, w in opt_reg_weights.items():
             print(f"  {m}: {w*100:.1f}%")
 
     if opt_norm_weights:
-        print(f"\nOptimal weights for NORMAL matches:")
+        print("\nOptimal weights for NORMAL matches:")
         for m, w in opt_norm_weights.items():
             print(f"  {m}: {w*100:.1f}%")
 
@@ -462,7 +460,7 @@ Regression matches ({regression_count}):
 """)
 
     if len(regression_df) > 0:
-        print(f"  Performance on regression matches:")
+        print("  Performance on regression matches:")
         print(f"    Standard: {std_reg['accuracy']*100:.1f}% acc, {std_reg['brier']:.4f} Brier")
         print(f"    Regression-Aware: {reg_reg['accuracy']*100:.1f}% acc, {reg_reg['brier']:.4f} Brier")
 

@@ -6,10 +6,9 @@ Updates match results, recalculates ELO ratings, and updates team stats.
 import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -30,7 +29,7 @@ settings = get_settings()
 class ResultsUpdateJob:
     """Updates match results and recalculates statistics."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.football_client = FootballDataClient()
         self.elo = EloRatingSystem()
@@ -294,7 +293,7 @@ class ResultsUpdateJob:
 
         return updated
 
-    def _calculate_team_stats(self, team_id: int, matchweek: int) -> Optional[TeamStats]:
+    def _calculate_team_stats(self, team_id: int, matchweek: int) -> TeamStats | None:
         """Calculate statistics for a team up to a matchweek."""
         # Get all matches for team up to this matchweek
         stmt = (
@@ -417,7 +416,7 @@ class ResultsUpdateJob:
         stmt = (
             select(ValueBet)
             .join(Match)
-            .where(ValueBet.is_active == True)
+            .where(ValueBet.is_active)
             .where(Match.status == MatchStatus.FINISHED)
         )
         active_bets = list(self.session.execute(stmt).scalars().all())

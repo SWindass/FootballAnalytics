@@ -11,14 +11,12 @@ where elevated draw rates caused accuracy to drop from 54.6% to 47.6%.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
 from batch.models.seasonal_recalibration import (
-    SeasonalRecalibration,
     ConservativeRecalibration,
     apply_draw_threshold_adjustment,
 )
@@ -158,8 +156,8 @@ class EnsemblePredictor:
         pidc_probs: tuple[float, float, float],
         pi_probs: tuple[float, float, float],
         elo_probs: tuple[float, float, float],
-        match_features: Optional[dict] = None,
-        apply_recalibration: Optional[bool] = None,
+        match_features: dict | None = None,
+        apply_recalibration: bool | None = None,
     ) -> EnsemblePrediction:
         """Combine predictions from three models.
 
@@ -233,7 +231,7 @@ class EnsemblePredictor:
         pidc_probs: tuple,
         pi_probs: tuple,
         elo_probs: tuple,
-        features: Optional[dict],
+        features: dict | None,
     ) -> np.ndarray:
         """Calculate weights based on strategy."""
         if self.strategy == "fixed":
@@ -253,7 +251,7 @@ class EnsemblePredictor:
         pidc_probs: tuple,
         pi_probs: tuple,
         elo_probs: tuple,
-        features: Optional[dict],
+        features: dict | None,
     ) -> np.ndarray:
         """Adjust weights based on match characteristics."""
         weights = self.base_weights.copy()
@@ -377,7 +375,6 @@ def optimize_ensemble_weights(
         return total_metric / len(results_df)
 
     # Optimize with constraints
-    from scipy.optimize import minimize
 
     # Initial weights
     x0 = np.array([0.33, 0.33, 0.34])
@@ -462,7 +459,7 @@ def evaluate_ensemble(
                  "D": {"H": 0, "D": 0, "A": 0},
                  "A": {"H": 0, "D": 0, "A": 0}}
 
-    for pred, actual in zip(predictions, actuals):
+    for pred, actual in zip(predictions, actuals, strict=False):
         # Predicted outcome
         predicted = pred.get_prediction()
 
@@ -536,7 +533,7 @@ def analyze_ensemble_vs_individuals(
         "disagreement_ensemble_wrong": 0,
     }
 
-    for idx, row in results_df.iterrows():
+    for _idx, row in results_df.iterrows():
         actual = row["actual"]
 
         # Individual predictions

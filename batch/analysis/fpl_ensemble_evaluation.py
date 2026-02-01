@@ -17,13 +17,11 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.db.database import SyncSessionLocal
-from app.db.models import Match, Team, Player, PlayerMatchPerformance
-
+from app.db.models import Match, Player, PlayerMatchPerformance, Team
+from batch.models.elo import EloConfig, EloRatingSystem
+from batch.models.fpl_predictor import FPLPredictor
 from batch.models.pi_dixon_coles import PiDixonColesModel
 from batch.models.pi_rating import PiRating
-from batch.models.elo import EloRatingSystem, EloConfig
-from batch.models.fpl_predictor import FPLPredictor
-from batch.models.ensemble_predictor import EnsemblePredictor
 
 
 def load_fpl_data(session) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -485,7 +483,7 @@ def main():
     print("=" * 90)
 
     fpl_only = all_metrics["FPL Only"]
-    print(f"\nFPL-only model performance:")
+    print("\nFPL-only model performance:")
     print(f"  Accuracy:    {fpl_only['accuracy']:.1%}")
     print(f"  Brier Score: {fpl_only['brier']:.4f}")
     print(f"  Log Loss:    {fpl_only['log_loss']:.4f}")
@@ -540,7 +538,7 @@ def main():
     improvement_brier = (base_metrics["brier"] - fpl_metrics["brier"]) / base_metrics["brier"] * 100
     improvement_acc = (fpl_metrics["accuracy"] - base_metrics["accuracy"]) * 100
 
-    print(f"\nFPL Enhancement Impact:")
+    print("\nFPL Enhancement Impact:")
     print(f"  Brier Score Improvement: {improvement_brier:+.2f}%")
     print(f"  Accuracy Improvement:    {improvement_acc:+.2f}pp")
     print(f"  Optimal FPL Weight:      {optimal_fpl_weight:.1%}")

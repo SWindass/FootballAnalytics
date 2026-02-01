@@ -2,10 +2,9 @@
 
 import argparse
 import asyncio
-from decimal import Decimal
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchStatus, Team
@@ -48,7 +47,7 @@ async def fetch_xg_for_season(season: str) -> dict:
                 parsed = parse_understat_match(m)
                 if parsed["is_finished"] and parsed["home_xg"] is not None:
                     understat_matches.append(parsed)
-            except (KeyError, ValueError) as e:
+            except (KeyError, ValueError):
                 continue
 
         print(f"  Parsed {len(understat_matches)} finished matches with xG")
@@ -143,7 +142,7 @@ async def fetch_xg_for_season(season: str) -> dict:
 def check_xg_coverage():
     """Print xG data coverage stats."""
     with SyncSessionLocal() as session:
-        from sqlalchemy import func, text
+        from sqlalchemy import text
 
         result = session.execute(text("""
             SELECT season,

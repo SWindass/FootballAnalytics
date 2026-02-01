@@ -23,15 +23,6 @@ if config.config_file_name is not None:
 
 # Import models for autogenerate support
 from app.db.database import Base
-from app.db.models import (
-    EloRating,
-    Match,
-    MatchAnalysis,
-    OddsHistory,
-    Team,
-    TeamStats,
-    ValueBet,
-)
 
 target_metadata = Base.metadata
 

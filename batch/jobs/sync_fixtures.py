@@ -6,10 +6,9 @@ for accurate rest day calculations.
 
 import argparse
 from datetime import datetime
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.db.database import SyncSessionLocal
@@ -92,7 +91,7 @@ def _create_fixture_if_not_exists(
     competition: str,
     opponent_name: str,
     is_home: bool,
-    match_id: Optional[int] = None,
+    match_id: int | None = None,
 ) -> bool:
     """Create a TeamFixture record if it doesn't exist.
 
@@ -132,7 +131,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Sync matches to TeamFixture table"
     )
-    args = parser.parse_args()
+    parser.parse_args()
 
     # Suppress SQLAlchemy logging
     import logging
@@ -144,7 +143,7 @@ def main():
     with SyncSessionLocal() as session:
         result = sync_matches_to_fixtures(session)
 
-    print(f"\nSync complete!")
+    print("\nSync complete!")
     print(f"  Fixtures created: {result['fixtures_created']}")
     print(f"  Fixtures skipped: {result['fixtures_skipped']}")
 

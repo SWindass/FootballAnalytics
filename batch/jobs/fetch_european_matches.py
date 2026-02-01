@@ -9,10 +9,9 @@ Uses TeamFixture table to track fixtures even when opponent isn't in our DB.
 import argparse
 import asyncio
 from datetime import datetime
-from typing import Optional
 
 import structlog
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -30,7 +29,7 @@ class EuropeanMatchesFetcher:
     Populates TeamFixture table for rest day calculations.
     """
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
         self.client = FootballDataClient()
 
@@ -259,7 +258,7 @@ def main():
             season=args.season,
             competitions=args.competitions,
         )
-        print(f"\nFetch complete!")
+        print("\nFetch complete!")
         print(f"  Fixtures fetched: {result['fixtures_fetched']}")
         print(f"  Fixtures created: {result['fixtures_created']}")
         print(f"  Duration: {result['duration_seconds']:.1f}s")
