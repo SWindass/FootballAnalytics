@@ -413,26 +413,6 @@ button[kind="primary"]:hover {
     border-color: #ffffff !important;
 }
 
-/* Matchweek navigation buttons - first row of buttons after style block */
-div[data-testid="stHorizontalBlock"]:first-of-type button[kind="secondary"] {
-    background: #2a2a2a !important;
-    border: 2px solid #555 !important;
-    border-radius: 8px !important;
-    color: #fff !important;
-    font-weight: 600 !important;
-    font-size: 16px !important;
-    padding: 10px 20px !important;
-    min-height: 48px !important;
-}
-div[data-testid="stHorizontalBlock"]:first-of-type button[kind="secondary"]:hover:not(:disabled) {
-    background: #3a3a3a !important;
-    border-color: #777 !important;
-    color: #4da6ff !important;
-}
-div[data-testid="stHorizontalBlock"]:first-of-type button[kind="secondary"]:disabled {
-    opacity: 0.3 !important;
-    cursor: not-allowed !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -451,22 +431,25 @@ def go_next():
         st.session_state.fixture_matchweek = matchweeks[idx + 1]
 
 # Matchweek navigation with arrows
-nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
-
 current_idx = matchweeks.index(selected_mw)
 can_go_prev = current_idx > 0
 can_go_next = current_idx < len(matchweeks) - 1
 
+prev_text = f"◀ MW {matchweeks[current_idx - 1]}" if can_go_prev else ""
+next_text = f"MW {matchweeks[current_idx + 1]} ▶" if can_go_next else ""
+
+nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+
 with nav_col1:
-    st.button("◀ Prev", key="prev_mw", use_container_width=True,
-              on_click=go_prev, disabled=not can_go_prev)
+    if can_go_prev:
+        st.button(prev_text, key="prev_mw", on_click=go_prev)
 
 with nav_col2:
     st.markdown(f"<h1 style='text-align: center; margin: 0;'>Matchweek {selected_mw}</h1>", unsafe_allow_html=True)
 
 with nav_col3:
-    st.button("Next ▶", key="next_mw", use_container_width=True,
-              on_click=go_next, disabled=not can_go_next)
+    if can_go_next:
+        st.button(next_text, key="next_mw", on_click=go_next)
 
 # Group fixtures by date
 fixtures_by_date = {}
