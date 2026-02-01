@@ -38,9 +38,14 @@ show_user_info()
 
 @st.cache_data(ttl=60)
 def load_teams():
-    with SyncSessionLocal() as session:
-        teams = list(session.execute(select(Team)).scalars().all())
-        return {t.id: {"name": t.name, "short_name": t.short_name, "crest_url": t.crest_url} for t in teams}
+    try:
+        with SyncSessionLocal() as session:
+            teams = list(session.execute(select(Team)).scalars().all())
+            return {t.id: {"name": t.name, "short_name": t.short_name, "crest_url": t.crest_url} for t in teams}
+    except Exception as e:
+        st.error(f"Database error: {type(e).__name__}: {e}")
+        st.info(f"DB URL: {settings.database_url_sync[:50]}...")
+        raise
 
 
 @st.cache_data(ttl=60)
