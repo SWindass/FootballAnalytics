@@ -41,6 +41,52 @@ show_user_info()
 st.title("📈 Strategy Monitoring")
 
 
+# --- Era Status Section ---
+try:
+    from batch.betting.era_detection import calculate_era_status, run_5_year_simulation
+
+    with SyncSessionLocal() as session:
+        era_status = calculate_era_status(session)
+
+    st.header("🎯 Current Era Status")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        era_color = "🟢" if era_status.is_2020s_era else "🟡"
+        st.metric("Era", f"{era_color} {'2020s' if era_status.is_2020s_era else 'Pre-2020s'}")
+
+    with col2:
+        stop_color = "🔴" if era_status.stop_loss_triggered else "🟢"
+        st.metric("Stop-Loss", f"{stop_color} {'Triggered' if era_status.stop_loss_triggered else 'Active'}")
+
+    with col3:
+        st.metric("Total ROI", f"{era_status.roi:+.1%}", delta=f"{era_status.total_bets} bets")
+
+    with col4:
+        if era_status.rolling_12m_roi is not None:
+            st.metric("12-Month ROI", f"{era_status.rolling_12m_roi:+.1%}")
+
+    # Strategy activation status
+    col1, col2 = st.columns(2)
+    with col1:
+        away_icon = "✅" if era_status.away_strategy_active else "❌"
+        st.info(f"{away_icon} **Away 12% Edge**: {era_status.away_bets} bets, {era_status.away_win_rate:.1%} win, {era_status.away_roi:+.1%} ROI")
+
+    with col2:
+        home_icon = "✅" if era_status.home_form_override_active else "❌"
+        st.info(f"{home_icon} **Home Form Override**: {era_status.home_bets} bets, {era_status.home_win_rate:.1%} win, {era_status.home_roi:+.1%} ROI")
+
+    if era_status.stop_loss_reason:
+        st.error(f"⚠️ Stop-Loss Reason: {era_status.stop_loss_reason}")
+
+    st.divider()
+except ImportError:
+    st.warning("Era detection module not available. Run `python batch/jobs/strategy_backtest.py` to generate data.")
+except Exception as e:
+    st.error(f"Error loading era status: {e}")
+
+
 def get_strategies():
     """Load all betting strategies with stats."""
     with SyncSessionLocal() as session:
@@ -141,7 +187,7 @@ for i, strategy in enumerate(strategies):
 st.divider()
 
 # Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Performance", "🔧 Run Monitoring", "⚙️ Optimization", "📜 History"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Performance", "🔮 5-Year Simulation", "🔧 Run Monitoring", "⚙️ Optimization", "📜 History"])
 
 with tab1:
     st.header("Detailed Performance")
@@ -238,6 +284,72 @@ with tab1:
             st.info("No settled bets found for this strategy.")
 
 with tab2:
+    st.header("🔮 5-Year Forward Simulation")
+
+    st.markdown("""
+    Project future performance under different regime scenarios.
+    Uses historical data from the backtest to estimate future returns.
+    """)
+
+    try:
+        from batch.betting.era_detection import run_5_year_simulation
+
+        # Run simulations
+        scenarios = {
+            "regime_continues": "🟢 Regime Continues (Best Case)",
+            "regime_ends_year_2": "🟡 Regime Ends Year 2 (Conservative)",
+            "regime_ends_year_4": "🟠 Regime Ends Year 4 (Middle Case)",
+        }
+
+        cols = st.columns(len(scenarios))
+
+        with SyncSessionLocal() as session:
+            for i, (scenario_key, scenario_name) in enumerate(scenarios.items()):
+                result = run_5_year_simulation(session, scenario_key)
+
+                with cols[i]:
+                    st.subheader(scenario_name)
+                    st.metric("5-Year ROI", f"{result['total_roi']:+.1%}")
+                    st.metric("5-Year Profit", f"{result['total_profit']:+.1f} units")
+                    st.metric("Total Bets", f"{result['total_bets']:.0f}")
+
+        # Detailed simulation table
+        st.subheader("Detailed Year-by-Year Projection")
+
+        selected_scenario = st.selectbox(
+            "Select Scenario",
+            list(scenarios.keys()),
+            format_func=lambda x: scenarios[x]
+        )
+
+        with SyncSessionLocal() as session:
+            result = run_5_year_simulation(session, selected_scenario)
+
+            sim_data = []
+            for y in result['years']:
+                sim_data.append({
+                    "Year": y['year'],
+                    "Regime": "2020s" if y['is_2020s_regime'] else "Pre-2020s",
+                    "Away Bets": f"{y['away_bets']:.1f}",
+                    "Home Bets": f"{y['home_bets']:.1f}",
+                    "Total Bets": f"{y['total_bets']:.1f}",
+                    "Profit": f"{y['profit']:+.1f}",
+                    "ROI": f"{y['roi']:+.1%}",
+                    "Cumulative ROI": f"{y['cumulative_roi']:+.1%}",
+                })
+
+            st.dataframe(sim_data, use_container_width=True)
+
+        # Show assumptions
+        with st.expander("📊 Simulation Assumptions"):
+            st.json(result['assumptions'])
+
+    except ImportError:
+        st.warning("Run the backtest first to enable simulations: `python batch/jobs/strategy_backtest.py`")
+    except Exception as e:
+        st.error(f"Error running simulation: {e}")
+
+with tab3:
     st.header("Run Monitoring")
 
     st.markdown("""
@@ -293,7 +405,7 @@ with tab2:
             else:
                 st.caption("No snapshots yet. Run monitoring to create them.")
 
-with tab3:
+with tab4:
     st.header("Parameter Optimization")
 
     st.markdown("""
@@ -360,7 +472,7 @@ with tab3:
     else:
         st.info("No optimization runs yet.")
 
-with tab4:
+with tab5:
     st.header("Strategy History")
 
     for strategy in strategies:

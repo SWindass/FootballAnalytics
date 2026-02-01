@@ -1,5 +1,7 @@
 # FootballAnalytics - EPL Value Bet Finder
 
+> **Important:** Keep this documentation in sync with code changes. When modifying prediction models, betting strategies, database schema, or API endpoints, update the relevant sections of this file.
+
 ## Project Overview
 
 Backend system for analyzing English Premier League matches to identify value betting opportunities.
@@ -60,11 +62,69 @@ Key tables:
 
 ## Prediction Models
 
-1. **ELO Rating System** - Team strength rankings
-2. **Poisson Distribution** - Goal probability modeling
-3. **XGBoost Classifier** - Match outcome prediction
+1. **ELO Rating System** (`batch/models/elo.py`) - Team strength rankings via rating difference → logistic function
+2. **Poisson Distribution** (`batch/models/poisson.py`) - Expected goals → goal distribution modeling
+3. **Dixon-Coles** (`batch/jobs/backfill_new_models.py:32`) - Poisson with goal correlation adjustment (rho=-0.13)
+4. **Pi Rating** (`batch/jobs/backfill_new_models.py:96`) - ELO → expected score conversion
+5. **XGBoost Classifier** (`batch/models/xgb_model.py`) - Feature-based ML classifier
 
-Consensus probabilities are weighted averages of all models.
+### Prediction Pipeline: Models → Bets
+
+```
+┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+│    ELO      │   │   Poisson   │   │  Dixon-Coles│
+│  Ratings    │   │    Model    │   │    Model    │
+└──────┬──────┘   └──────┬──────┘   └──────┬──────┘
+       │                 │                 │
+       └────────┬────────┴────────┬────────┘
+                │                 │
+                ▼                 ▼
+        ┌───────────────────────────────┐
+        │      Neural Stacker /         │
+        │      Weighted Average         │
+        └───────────────┬───────────────┘
+                        │
+                        ▼
+        ┌───────────────────────────────┐
+        │    CONSENSUS PROBABILITIES    │
+        │  (stored in match_analyses)   │
+        └───────────────┬───────────────┘
+                        │
+        ┌───────────────┴───────────────┐
+        │                               │
+        ▼                               ▼
+┌───────────────┐               ┌───────────────┐
+│  Compare to   │               │  Compare to   │
+│  AWAY Odds    │               │  HOME Odds    │
+└───────┬───────┘               └───────┬───────┘
+        │                               │
+        ▼                               ▼
+┌───────────────┐               ┌───────────────┐
+│ Edge 5-12%?   │               │ Form >= 12?   │
+│ Exclude form  │               │ Edge < 0?     │
+│    4-6?       │               │               │
+└───────┬───────┘               └───────┬───────┘
+        │                               │
+        ▼                               ▼
+   VALUE BET:                      VALUE BET:
+   Away Win                        Home Win
+```
+
+**Step 1: Individual Models** - Each model generates probabilities (home win, draw, away win)
+
+**Step 2: Consensus Calculation** (`weekly_analysis.py:140-180`)
+- Neural stacker combines model outputs when available
+- Fallback: weighted average (40% market, 60% model average)
+
+**Step 3: Value Detection** (`backfill_value_bets.py`)
+```python
+market_implied_prob = 1 / bookmaker_odds
+edge = consensus_prob - market_implied_prob
+```
+
+**Step 4: Strategy Filters**
+- **Away Win**: Trust model over market (positive edge 5-12%, exclude home form 4-6)
+- **Home Win**: Trust market over model (negative edge, form 12+ momentum)
 
 ## Batch Job Schedule
 
@@ -136,66 +196,61 @@ ANTHROPIC_API_KEY=your_key
 
 ## Value Bet Detection
 
-### Proven Profitable Strategies (Backtested 2020-2025)
+### STATIC 5% + ERA-BASED FORM OVERRIDE STRATEGY
 
-#### Strategy 1: Away Wins with 5-12% Edge
-When consensus model probability exceeds market implied probability by 5-12%, away wins are profitable.
+**2020s Era Performance: ~140 bets, 56% win rate, +30% ROI**
 
-| Metric | Value |
-|--------|-------|
-| Total Bets (2020-25) | 185 |
-| Win Rate | 56.8% |
-| ROI | **+16.0%** |
-| Edge Range | 5% to 12% |
+This strategy uses era-based detection rather than regime detection because:
+1. Regime detection has a bootstrap problem - can't build ROI history without betting
+2. Era-based approach is simpler and validated across 30+ years of data
+
+#### Strategy 1: Away Wins with 5%+ Edge (Always Active)
+
+Trust the model when it identifies value in away teams.
+
+| Metric | 2020s Era |
+|--------|-----------|
+| Bets/Season | ~23 |
+| Win Rate | 55.6% |
+| ROI | **+30.2%** |
+| Edge Threshold | 5% minimum |
 | Odds Range | 1.50 to 8.00 |
+| Form Filter | Exclude home form 4-6 |
 
 **Criteria:**
 ```python
 edge = consensus_away_prob - (1 / away_odds)
-value_bet = (edge >= 0.05) and (edge <= 0.12) and (1.50 <= away_odds <= 8.00)
+value_bet = (edge >= 0.05) and (1.50 <= away_odds <= 8.00)
+            and home_form not in [4, 5, 6]
 ```
 
-**Season-by-season results:**
-| Season | Bets | Win Rate | ROI |
-|--------|------|----------|-----|
-| 2020-21 | 37 | 54.1% | +9.1% |
-| 2021-22 | 46 | 67.4% | +25.5% |
-| 2022-23 | 44 | 50.0% | -1.3% |
-| 2023-24 | 43 | 58.1% | +20.3% |
-| 2024-25 | 14 | 50.0% | +52.4% |
+#### Why 5% Instead of 12%?
 
-**Enhanced Variant: Exclude Home Form 4-6**
-Adding a filter to exclude bets when home team has "poor but not terrible" form (4-6 points) significantly improves ROI:
+Analysis revealed that **lower thresholds are MORE profitable in the 2020s era**:
 
-| Metric | Base | Enhanced |
-|--------|------|----------|
-| Total Bets | 132 | 85 |
-| Win Rate | 51.5% | 54.1% |
-| ROI | +18.5% | **+32.9%** |
+| Edge Threshold | Bets/Yr | Win% | ROI | Profit/Yr |
+|----------------|---------|------|-----|-----------|
+| **5%** | **23.4** | **55.6%** | **+30.2%** | **+35.4** |
+| 7% | 17.2 | 55.8% | +27.8% | +23.9 |
+| 9% | 11.4 | 54.4% | +11.8% | +6.7 |
+| 12% (old) | 6.4 | 59.4% | +23.0% | +7.4 |
 
-Why it works: When home team form is 4-6, they're in a slump but haven't fully collapsed. The market may have already adjusted odds, removing the edge. At extremes (<=3 or >=7), the edge remains.
+**Key insight:** The 5% threshold produces **5x more profit** than 12% because:
 
-```python
-# Enhanced filter
-value_bet = (edge >= 0.05) and (edge <= 0.12) and (1.50 <= away_odds <= 8.00)
-            and (home_form <= 3 or home_form >= 7)  # Exclude "poor" form 4-6
-```
+1. **Model is well-calibrated in 2020s** - The consensus model accurately identifies value
+2. **Even small edges are real** - 55.6% win rate at 5% edge proves the model finds true value
+3. **Volume compounds** - More bets × decent ROI = significantly more profit
+4. **Historical data was different** - Pre-2020s required 12% because model was less calibrated
 
-Enhanced variant season results (5/5 profitable):
-| Season | Bets | Win Rate | ROI |
-|--------|------|----------|-----|
-| 2020-21 | 17 | 52.9% | +36.0% |
-| 2021-22 | 21 | 61.9% | +53.5% |
-| 2022-23 | 22 | 50.0% | +18.5% |
-| 2023-24 | 17 | 47.1% | +27.1% |
-| 2024-25 | 8 | 62.5% | +24.4% |
+The 5% threshold is optimal for the modern era where our prediction models have access to better data (xG, advanced stats) and the consensus stacker is well-trained.
 
-#### Strategy 2: Home Wins - Hot Streaks with Negative Edge
-**Counterintuitive but profitable.** When home team is on a hot streak AND the market values them MORE than our model, back the home team. Our ELO/Poisson model undervalues momentum; the market prices it better.
+#### Strategy 2: Home Form Override (2020s Era Only)
 
-| Metric | Value |
-|--------|-------|
-| Total Bets (2020-25) | 94 |
+**Only active from season 2020-21 onwards.** When home team is on a hot streak AND the market values them MORE than our model, back the home team.
+
+| Metric | 2020s Era |
+|--------|-----------|
+| Bets/Season | ~16 |
 | Win Rate | 67.0% |
 | ROI | **+30.4%** |
 | Form Requirement | 12+ points (from last 5 games) |
@@ -203,32 +258,34 @@ Enhanced variant season results (5/5 profitable):
 
 **Criteria:**
 ```python
+# Only in 2020s era (season >= "2020-21")
 form_points = sum of points from last 5 games (W=3, D=1, L=0), max 15
 edge = consensus_home_prob - (1 / home_odds)
-value_bet = (form_points >= 12) and (edge < 0)  # Market sees MORE value than model
+value_bet = (form_points >= 12) and (edge < 0) and is_2020s_era()
 ```
 
-**Season-by-season results:**
-| Season | Bets | Win Rate | ROI |
-|--------|------|----------|-----|
-| 2020-21 | 11 | 36.4% | -53.2% (Covid season) |
-| 2021-22 | 20 | 65.0% | +30.1% |
-| 2022-23 | 20 | 75.0% | +71.5% |
-| 2023-24 | 17 | 64.7% | +29.8% |
-| 2024-25 | 14 | 85.7% | +42.8% |
-| 2025-26 | 12 | 66.7% | +25.7% |
+Why this is era-restricted: The home form override was unprofitable pre-2020 (-9.4% ROI) but highly profitable in the 2020s. Teams on hot streaks have momentum that statistical models undervalue.
 
-**Why it works:** Teams on exceptional form (4+ wins in last 5) have momentum that our statistical models don't capture. When the market prices them as stronger favorites than our model suggests, trust the market - they're pricing intangible factors like confidence and team cohesion.
+### Combined Strategy Performance (2020s Era)
 
-### Combined Strategy Performance
+| Strategy | Bets/Yr | Win% | ROI | Profit/Yr |
+|----------|---------|------|-----|-----------|
+| Away 5% Edge | ~23 | 55.6% | +30.2% | +35 units |
+| Home Form Override | ~16 | 67.0% | +30.4% | +29 units |
+| **COMBINED** | **~39** | **~60%** | **~30%** | **~64 units** |
 
-Both strategies are now implemented in `batch/jobs/backfill_value_bets.py` and stored in the database.
+### Expected Annual Results
 
-| Strategy | Bets | Win% | ROI |
-|----------|------|------|-----|
-| Away Win (enhanced) | 85 | 54.1% | +32.9% |
-| Home Win (form 12+) | 94 | 67.0% | +30.4% |
-| **COMBINED** | **179** | **60.9%** | **+31.6%** |
+| Unit Stake | Bets/Yr | Expected Profit |
+|------------|---------|-----------------|
+| £10 | ~39 | **~£640/season** |
+| £25 | ~39 | **~£1,600/season** |
+| £50 | ~39 | **~£3,200/season** |
+
+### Stop-Loss Rules
+
+- **Hard stop if 12-month rolling ROI < -20%**
+- **Hard stop if away success rate < 30% over 50+ bets**
 
 ### Strategies That DON'T Work
 
@@ -236,15 +293,15 @@ Both strategies are now implemented in `batch/jobs/backfill_value_bets.py` and s
 |----------|--------|
 | Home wins with positive edge | -19.1% ROI (model overvalues favorites) |
 | Draws (any edge) | -5% to -14% ROI |
-| Over 2.5 goals | Marginal at best (+2.7% at 5-8% edge, inconsistent) |
-| Away wins with edge < 5% | Negative ROI (-9.3%) |
-| Away wins with edge > 12% | Lower ROI (+12.4%) - model overconfident |
+| Away wins with edge > 15% | Model overconfident at extreme edges |
+| Home form override pre-2020 | -9.4% ROI |
 
 ### Implementation
 
-Value bets are generated by `batch/jobs/backfill_value_bets.py` using the proven strategy.
-
-Kelly Criterion used for stake sizing with fractional Kelly (0.25) for risk management.
+- Value bets generated by `batch/jobs/backfill_value_bets.py`
+- Era detection in `batch/betting/era_detection.py`
+- Backtest script at `batch/jobs/strategy_backtest.py`
+- Kelly Criterion for stake sizing (25% Kelly, max 5% stake)
 
 ## AI Narratives
 

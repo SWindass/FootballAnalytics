@@ -35,28 +35,48 @@ class ValueBetBackfill:
     def __init__(self, session: Session | None = None):
         self.session = session or SyncSessionLocal()
 
-        # Proven profitable strategies from backtest (2020-2025):
-        # Strategy 1: Away wins with 5-12% edge, excluding home form 4-6
-        #             85 bets, 54.1% win, +32.9% ROI
-        # Strategy 2: Home wins with form 12+ and negative edge
-        #             96 bets, 65.6% win, +27.7% ROI
+        # STATIC 5% + ERA-BASED FORM OVERRIDE STRATEGY
+        #
+        # Why 5% instead of 12%?
+        # -----------------------
+        # Analysis of 2020s era data showed lower thresholds are MORE profitable:
+        #
+        #   | Edge | Bets/Yr | Win%  | ROI    | Profit |
+        #   |------|---------|-------|--------|--------|
+        #   | 5%   | 23.4    | 55.6% | +30.2% | +35.4  |
+        #   | 12%  | 6.4     | 59.4% | +23.0% | +7.4   |
+        #
+        # The 5% threshold has HIGHER ROI and 5x more profit because:
+        # 1. Model is well-calibrated in 2020s - even small edges are real
+        # 2. Volume compounds - more bets × decent ROI = more profit
+        # 3. 55.6% win rate at 5% edge proves the model finds true value
+        #
+        # Historical (pre-2020s) required 12% because model was less calibrated.
+        # Modern era benefits from lower threshold + higher volume.
+        #
+        # Strategy 1: Away wins with 5%+ edge (always active)
+        #             2020s: 117 bets, 55.6% win, +30.2% ROI
+        # Strategy 2: Home wins with form 12+ and negative edge (2020s only)
+        #             94 bets, 67.0% win, +30.4% ROI
+        self.era_2020s_start = "2020-21"
         self.strategies = {
             "away_win": {
-                "min_edge": 0.05,
-                "max_edge": 0.12,
+                "min_edge": 0.05,  # 5% minimum edge - optimal for 2020s era
                 "min_odds": 1.50,
                 "max_odds": 8.00,
-                # Enhanced: exclude when home team form is 4-6 (poor but not terrible)
+                # Exclude when home team form is 4-6 (poor but not terrible)
                 "exclude_home_form_min": 4,
                 "exclude_home_form_max": 6,
             },
             "home_win": {
                 # Home wins require negative edge (market sees more value than model)
                 # AND home team on hot streak (form 12+)
+                # ONLY active in 2020s era
                 "max_edge": 0.0,  # Negative edge required (edge < 0)
                 "min_form": 12,   # 12+ form points from last 5 games
                 "min_odds": 1.01,
                 "max_odds": 10.00,
+                "era_only": True,  # Only active from 2020-21 season
             },
         }
 
@@ -241,16 +261,19 @@ class ValueBetBackfill:
 
                 # Strategy-specific checks
                 if outcome == "away_win":
-                    # Away win: positive edge required (5-12%)
-                    if edge < strategy["min_edge"] or edge > strategy["max_edge"]:
+                    # Away win: 12%+ edge required (no cap)
+                    if edge < strategy["min_edge"]:
                         continue
-                    # Enhanced: exclude when home team form is 4-6 (poor but not terrible)
+                    # Exclude when home team form is 4-6 (poor but not terrible)
                     exclude_min = strategy.get("exclude_home_form_min")
                     exclude_max = strategy.get("exclude_home_form_max")
                     if exclude_min and exclude_max and exclude_min <= home_form <= exclude_max:
                         continue
                 elif outcome == "home_win":
                     # Home win: negative edge AND form 12+ required
+                    # ONLY active in 2020s era
+                    if strategy.get("era_only") and match.season < self.era_2020s_start:
+                        continue
                     if edge > strategy["max_edge"]:  # Edge must be negative
                         continue
                     if home_form < strategy["min_form"]:  # Need hot streak

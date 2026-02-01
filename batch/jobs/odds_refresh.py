@@ -2,9 +2,11 @@
 
 Captures final odds before weekend matches and detects value bets.
 
-Value bet strategies (backtest validated on 2020-2025 data):
-1. Away wins with 5-12% edge: +20.5% ROI, 51.6% win rate
-2. Home wins with odds < 1.7, edge >= 10%, reliable teams: +21.6% ROI, 83% win rate
+Value bet strategies (STATIC 5% + ERA-BASED FORM OVERRIDE - backtest validated):
+1. Away wins with 5%+ edge: +30.2% ROI in 2020s era, excludes home form 4-6
+2. Home wins with negative edge + form 12+: +30.4% ROI (2020s era only)
+   - This is counterintuitive: when market values home team MORE than model,
+     AND home team is on a hot streak (form 12+), trust the market momentum.
 """
 
 import asyncio
@@ -46,26 +48,32 @@ class OddsRefreshJob:
         self.session = session or SyncSessionLocal()
         self.odds_client = OddsApiClient()
 
-        # Use optimized config with both strategies:
-        # 1. Away wins with 5-12% edge (+20% ROI)
-        # 2. Home wins with odds < 1.7, edge >= 10%, reliable teams (+21% ROI)
+        # STATIC 5% + ERA-BASED FORM OVERRIDE STRATEGY (backtest validated)
+        #
+        # Why this strategy works (2020s era):
+        # - Away wins 5%+: 117 bets, 55.6% win rate, +30.2% ROI
+        # - Home wins with form 12+ and negative edge: 94 bets, 67.0% win, +30.4% ROI
+        #
+        # The home win strategy is counterintuitive: when the market values the
+        # home team MORE than our model, AND the home team is on a hot streak,
+        # trust the market's momentum pricing over our statistical models.
         self.value_detector = ValueDetector(ValueDetectorConfig(
-            # Away win strategy
+            # Away win strategy - 5%+ edge, no upper cap
             min_edge=0.05,
-            max_edge=0.12,
+            max_edge=1.0,  # No practical cap (was 0.12)
             allowed_outcomes=["away_win"],
             min_confidence=0.50,
             min_models_agreeing=1,
-            # Home win strategy (conditional filtering)
+            min_odds=1.50,  # Match backfill strategy
+            max_odds=8.00,  # Match backfill strategy
+            # Home win strategy - negative edge + form 12+ (era-based)
             enable_home_wins=True,
-            home_max_odds=1.70,
-            home_min_edge=0.10,
-            home_max_edge=0.25,
-            # Team reliability filtering
-            use_reliability_filter=True,
-            reliability_min_history=2,
-            reliability_lookback=10,
-            reliability_min_threshold=0.60,
+            home_max_odds=10.00,  # No odds restriction for form-based bets
+            home_min_edge=-1.0,  # Negative edge required (market > model)
+            home_max_edge=0.0,   # Edge must be < 0
+            home_min_form=12,    # 12+ form points from last 5 games (W=3, D=1, L=0)
+            # Disable old reliability filter - using form instead
+            use_reliability_filter=False,
         ))
 
         # Load persisted reliability state

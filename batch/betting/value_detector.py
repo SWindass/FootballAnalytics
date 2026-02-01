@@ -6,9 +6,12 @@ disagree with market odds in a predictable, profitable way.
 Key insight: Don't try to beat the market on raw prediction.
 Instead, find the 5-10% of matches where you have genuine edge.
 
-Strategies (backtest validated on 2020-2025 data):
-1. Away wins with 5-12% edge: +20.5% ROI, 51.6% win rate
-2. Home wins with odds < 1.7, edge >= 10%, reliable teams only: +21.6% ROI, 83% win rate
+STATIC 5% + ERA-BASED FORM OVERRIDE STRATEGY (backtest validated 2020-2025):
+1. Away wins with 5%+ edge: +30.2% ROI, 55.6% win rate
+   - Excludes home form 4-6 (poor but not terrible)
+2. Home wins with negative edge + form 12+: +30.4% ROI, 67.0% win rate
+   - Counterintuitive: trust market when home team is on hot streak
+   - Market prices momentum better than our statistical models
 """
 
 from collections import defaultdict
@@ -258,15 +261,23 @@ class ValueDetectorConfig:
     xg_regression_threshold: float = -0.3  # xG underperformance to flag
     key_injury_threshold: int = 2  # Number of key players out to flag
 
-    # === Home win strategy (conditional filtering) ===
-    # Backtest: odds < 1.7, edge >= 10%, reliable teams = +21.6% ROI
+    # === Home win strategy (ERA-BASED FORM OVERRIDE) ===
+    # Backtest: negative edge + form 12+ = +30.4% ROI, 67% win rate
+    # This is counterintuitive: when market values home team MORE than model,
+    # AND home team is on a hot streak, trust market momentum pricing.
     enable_home_wins: bool = True  # Enable filtered home win detection
-    home_max_odds: float = 1.70  # Only short-priced home favorites
-    home_min_edge: float = 0.10  # Higher edge threshold for home wins
-    home_max_edge: float = 0.25  # Home wins can have higher valid edges
+    home_max_odds: float = 10.00  # No practical odds restriction
+    home_min_edge: float = -1.0   # Negative edge required (market > model)
+    home_max_edge: float = 0.0    # Edge must be < 0
+    home_min_form: int = 12       # 12+ form points from last 5 games (W=3, D=1)
 
-    # Team reliability filtering for home wins
-    use_reliability_filter: bool = True  # Filter out unreliable teams
+    # Away win form exclusion - skip when home team form is 4-6
+    # (poor but not terrible - market may have already adjusted)
+    away_exclude_home_form_min: int = 4
+    away_exclude_home_form_max: int = 6
+
+    # Team reliability filtering for home wins (DEPRECATED - using form instead)
+    use_reliability_filter: bool = False  # Disabled - form is more predictive
     reliability_min_history: int = 2  # Min bets to establish reliability
     reliability_lookback: int = 10  # Rolling window for reliability calc
     reliability_min_threshold: float = 0.60  # Min win rate to be "reliable"
@@ -361,6 +372,11 @@ class ValueDetector:
         if self.config.enable_home_wins and "home_win" not in outcomes_to_check:
             outcomes_to_check.append("home_win")
 
+        # Get home team form points for strategy filtering
+        home_form = 0
+        if home_stats and home_stats.form_points is not None:
+            home_form = home_stats.form_points
+
         for outcome in outcomes_to_check:
             for bookmaker, bookie_odds in market_odds.items():
                 if outcome not in bookie_odds:
@@ -370,11 +386,17 @@ class ValueDetector:
 
                 # Different rules for home wins vs other outcomes
                 if outcome == "home_win" and self.config.enable_home_wins:
-                    # Home win strategy: odds < 1.7, edge >= 10%, reliable teams
+                    # ERA-BASED FORM OVERRIDE: negative edge + form 12+
+                    # When market values home team MORE than model AND home
+                    # team is on a hot streak, trust market momentum pricing.
                     if decimal_odds > self.config.home_max_odds:
-                        continue  # Only short-priced favorites
+                        continue
 
-                    # Check team reliability if filter is enabled
+                    # Check form requirement (12+ from last 5 games)
+                    if home_form < self.config.home_min_form:
+                        continue
+
+                    # Check team reliability if filter is enabled (deprecated)
                     if (self.config.use_reliability_filter
                         and self.reliability_tracker
                         and home_team_id):
@@ -385,11 +407,24 @@ class ValueDetector:
                             )
                             continue
 
-                    min_edge = self.config.home_min_edge
-                    max_edge = self.config.home_max_edge
+                    min_edge = self.config.home_min_edge  # -1.0 (negative required)
+                    max_edge = self.config.home_max_edge  # 0.0 (must be < 0)
+                elif outcome == "away_win":
+                    # Away win strategy: 5%+ edge, exclude home form 4-6
+                    if decimal_odds < self.config.min_odds or decimal_odds > self.config.max_odds:
+                        continue
+
+                    # Exclude when home team form is 4-6 (poor but not terrible)
+                    # Market may have already adjusted odds in this zone
+                    exclude_min = self.config.away_exclude_home_form_min
+                    exclude_max = self.config.away_exclude_home_form_max
+                    if exclude_min <= home_form <= exclude_max:
+                        continue
+
+                    min_edge = self.config.min_edge
+                    max_edge = self.config.max_edge
                 else:
-                    # Standard strategy for away wins and draws
-                    # Skip if odds outside range
+                    # Standard strategy for draws
                     if decimal_odds < self.config.min_odds or decimal_odds > self.config.max_odds:
                         continue
                     min_edge = self.config.min_edge
