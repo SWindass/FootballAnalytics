@@ -633,6 +633,14 @@ if analysis and analysis.get('narrative'):
 # --- Predictions ---
 st.subheader("📊 Predictions")
 
+# Debug: show what's in analysis
+with st.expander("🔧 Debug: Analysis Data", expanded=False):
+    if analysis:
+        st.write(f"Dixon-Coles: {analysis.get('dixon_coles_home_prob')}")
+        st.write(f"Pi Rating: {analysis.get('pi_rating_home_prob')}")
+    else:
+        st.write("No analysis data")
+
 col1, col2 = st.columns(2)
 
 with col1:
