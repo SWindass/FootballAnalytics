@@ -58,6 +58,8 @@ class ValueBetBackfill:
         #             2020s: 117 bets, 55.6% win, +30.2% ROI
         # Strategy 2: Home wins with form 12+ and negative edge (2020s only)
         #             94 bets, 67.0% win, +30.4% ROI
+        # Strategy 3: Over 2.5 goals with 10-12% edge (2020s only)
+        #             97 bets, 62.9% win, +6.6% ROI
         self.era_2020s_start = "2020-21"
         self.strategies = {
             "away_win": {
@@ -76,6 +78,16 @@ class ValueBetBackfill:
                 "min_form": 12,   # 12+ form points from last 5 games
                 "min_odds": 1.01,
                 "max_odds": 10.00,
+                "era_only": True,  # Only active from 2020-21 season
+            },
+            "over_2_5": {
+                # Over 2.5 goals with tight 10-12% edge (Poisson model)
+                # Backtest: 97 bets, 62.9% win rate, +6.6% ROI
+                # ONLY active in 2020s era
+                "min_edge": 0.10,  # 10% minimum edge
+                "max_edge": 0.12,  # 12% maximum edge (higher is overconfident)
+                "min_odds": 1.50,
+                "max_odds": 3.00,
                 "era_only": True,  # Only active from 2020-21 season
             },
         }
@@ -162,14 +174,13 @@ class ValueBetBackfill:
             return 0, 0
 
         # If force, delete existing value bets for this season
-        # Only delete the outcomes we're regenerating (away_win, home_win)
-        # Preserve other outcomes like over_2_5 from odds_refresh
+        # Only delete the outcomes we're regenerating
         if force:
             match_ids = [m.id for m, _ in matches]
             self.session.execute(
                 delete(ValueBet)
                 .where(ValueBet.match_id.in_(match_ids))
-                .where(ValueBet.outcome.in_(["away_win", "home_win"]))
+                .where(ValueBet.outcome.in_(["away_win", "home_win", "over_2_5"]))
             )
             self.session.flush()
 
@@ -217,6 +228,9 @@ class ValueBetBackfill:
                 if oh.home_odds:
                     if "home_win" not in best_odds or float(oh.home_odds) > best_odds["home_win"]["odds"]:
                         best_odds["home_win"] = {"odds": float(oh.home_odds), "bookmaker": oh.bookmaker}
+                if oh.over_2_5_odds:
+                    if "over_2_5" not in best_odds or float(oh.over_2_5_odds) > best_odds["over_2_5"]["odds"]:
+                        best_odds["over_2_5"] = {"odds": float(oh.over_2_5_odds), "bookmaker": oh.bookmaker}
 
             # Fall back to historical_odds from features
             if analysis.features:
@@ -225,6 +239,8 @@ class ValueBetBackfill:
                     best_odds["away_win"] = {"odds": hist_odds["avg_away_odds"], "bookmaker": "historical"}
                 if "home_win" not in best_odds and hist_odds.get("avg_home_odds"):
                     best_odds["home_win"] = {"odds": hist_odds["avg_home_odds"], "bookmaker": "historical"}
+                if "over_2_5" not in best_odds and hist_odds.get("avg_over_2_5_odds"):
+                    best_odds["over_2_5"] = {"odds": hist_odds["avg_over_2_5_odds"], "bookmaker": "historical"}
 
             if not best_odds:
                 continue
@@ -249,6 +265,8 @@ class ValueBetBackfill:
                     model_prob = float(analysis.consensus_home_prob or 0)
                 elif outcome == "draw":
                     model_prob = float(analysis.consensus_draw_prob or 0)
+                elif outcome == "over_2_5":
+                    model_prob = float(analysis.poisson_over_2_5_prob or 0)
                 else:
                     continue
 
@@ -282,6 +300,15 @@ class ValueBetBackfill:
                         continue
                     if home_form < strategy["min_form"]:  # Need hot streak
                         continue
+                elif outcome == "over_2_5":
+                    # Over 2.5 goals: 10-12% edge required (tight band)
+                    # ONLY active in 2020s era
+                    if strategy.get("era_only") and match.season < self.era_2020s_start:
+                        continue
+                    if edge < strategy["min_edge"]:  # Need at least 10% edge
+                        continue
+                    if edge > strategy["max_edge"]:  # Cap at 12% (higher is overconfident)
+                        continue
                 else:
                     continue
 
@@ -294,6 +321,7 @@ class ValueBetBackfill:
                     "home_win": BetOutcome.HOME_WIN,
                     "draw": BetOutcome.DRAW,
                     "away_win": BetOutcome.AWAY_WIN,
+                    "over_2_5": BetOutcome.OVER_2_5,
                 }
 
                 bet_outcome = outcome_map.get(outcome)
