@@ -178,6 +178,8 @@ current_mw = get_current_matchweek()
 
 # --- Sidebar ---
 
+APP_VERSION = "1.0.0"
+
 with st.sidebar:
     st.subheader("Matchweek")
 
@@ -195,6 +197,10 @@ with st.sidebar:
     st.divider()
     st.caption("**Legend**")
     st.caption("🟢 Win  🟡 Draw  🔴 Loss")
+
+    # Version at bottom of sidebar
+    st.markdown("---")
+    st.caption(f"v{APP_VERSION}")
 
 
 # --- Load fixtures for selected matchweek ---
