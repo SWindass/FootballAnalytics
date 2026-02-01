@@ -644,6 +644,11 @@ st.subheader("📊 Predictions")
 # Debug: show what's in analysis
 with st.expander("🔧 Debug: Analysis Data", expanded=False):
     st.write(f"Match ID: {match_id}")
+
+    # Show DB connection info
+    db_url = settings.database_url_sync
+    st.write(f"DB: ...{db_url[-40:]}")  # Show last 40 chars
+
     if analysis:
         st.write(f"ELO (should work): {analysis.get('elo_home_prob')}")
         st.write(f"Dixon-Coles: {analysis.get('dixon_coles_home_prob')}")
@@ -655,6 +660,13 @@ with st.expander("🔧 Debug: Analysis Data", expanded=False):
     st.write("--- Direct DB Query ---")
     from sqlalchemy import text
     with SyncSessionLocal() as test_session:
+        # Check if columns exist
+        col_check = test_session.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'match_analyses' AND column_name LIKE 'dixon%'
+        """)).fetchall()
+        st.write(f"Dixon columns exist: {[c[0] for c in col_check]}")
+
         test_row = test_session.execute(text("""
             SELECT dixon_coles_home_prob, pi_rating_home_prob
             FROM match_analyses WHERE match_id = :mid
