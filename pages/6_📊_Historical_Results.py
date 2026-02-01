@@ -289,11 +289,11 @@ def load_season_summary(season: str):
 
             actual = "home_win" if home_score > away_score else ("draw" if home_score == away_score else "away_win")
 
-            # Away win strategy: 5-12% edge
+            # Away win strategy: 5%+ edge (no upper cap - see CLAUDE.md)
             market_prob = 1.0 / float(away_odds)
             edge = float(away_prob) - market_prob
 
-            if 0.05 <= edge <= 0.12:
+            if edge >= 0.05:
                 won = "away_win" == actual
                 profit = 10 * (float(away_odds) - 1) if won else -10
                 mw_stats[mw]["bets"] += 1
