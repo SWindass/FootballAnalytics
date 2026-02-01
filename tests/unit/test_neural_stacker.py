@@ -5,6 +5,8 @@ from decimal import Decimal
 from unittest.mock import Mock, MagicMock
 from typing import Optional
 
+# Skip all tests if torch is not available (not installed in CI)
+torch = pytest.importorskip("torch", reason="torch not installed")
 from batch.models.neural_stacker import NeuralStacker
 
 
