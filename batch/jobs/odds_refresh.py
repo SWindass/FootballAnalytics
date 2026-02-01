@@ -7,6 +7,8 @@ Value bet strategies (STATIC 5% + ERA-BASED FORM OVERRIDE - backtest validated):
 2. Home wins with negative edge + form 12+: +30.4% ROI (2020s era only)
    - This is counterintuitive: when market values home team MORE than model,
      AND home team is on a hot streak (form 12+), trust the market momentum.
+3. Over 2.5 goals with 10-12% edge: +6.6% ROI, 62.9% win rate
+   - Uses Poisson model probability for over 2.5 goals
 """
 
 import asyncio
@@ -72,6 +74,12 @@ class OddsRefreshJob:
             home_min_edge=-1.0,  # Negative edge required (market > model)
             home_max_edge=0.0,   # Edge must be < 0
             home_min_form=12,    # 12+ form points from last 5 games (W=3, D=1, L=0)
+            # Over 2.5 goals strategy - 10-12% edge (Poisson model)
+            enable_over_2_5=True,
+            over_2_5_min_edge=0.10,  # 10% minimum edge
+            over_2_5_max_edge=0.12,  # 12% maximum (higher is overconfident)
+            over_2_5_min_odds=1.50,
+            over_2_5_max_odds=3.00,
             # Disable old reliability filter - using form instead
             use_reliability_filter=False,
         ))

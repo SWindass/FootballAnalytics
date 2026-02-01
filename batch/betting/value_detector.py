@@ -12,6 +12,9 @@ STATIC 5% + ERA-BASED FORM OVERRIDE STRATEGY (backtest validated 2020-2025):
 2. Home wins with negative edge + form 12+: +30.4% ROI, 67.0% win rate
    - Counterintuitive: trust market when home team is on hot streak
    - Market prices momentum better than our statistical models
+3. Over 2.5 goals with 10-12% edge: +6.6% ROI, 62.9% win rate
+   - Uses Poisson model probability for over 2.5 goals
+   - Tight edge band prevents overconfidence
 """
 
 from collections import defaultdict
@@ -276,6 +279,15 @@ class ValueDetectorConfig:
     away_exclude_home_form_min: int = 4
     away_exclude_home_form_max: int = 6
 
+    # === Over 2.5 goals strategy ===
+    # Backtest: 10-12% edge = +6.6% ROI, 62.9% win rate
+    # Uses Poisson model probability for over 2.5 goals
+    enable_over_2_5: bool = True  # Enable over 2.5 goals detection
+    over_2_5_min_edge: float = 0.10  # 10% minimum edge
+    over_2_5_max_edge: float = 0.12  # 12% maximum (higher is overconfident)
+    over_2_5_min_odds: float = 1.50  # Minimum odds
+    over_2_5_max_odds: float = 3.00  # Maximum odds
+
     # Team reliability filtering for home wins (DEPRECATED - using form instead)
     use_reliability_filter: bool = False  # Disabled - form is more predictive
     reliability_min_history: int = 2  # Min bets to establish reliability
@@ -372,6 +384,10 @@ class ValueDetector:
         if self.config.enable_home_wins and "home_win" not in outcomes_to_check:
             outcomes_to_check.append("home_win")
 
+        # Add over_2_5 if enabled
+        if self.config.enable_over_2_5:
+            outcomes_to_check.append("over_2_5")
+
         # Get home team form points for strategy filtering
         home_form = 0
         if home_stats and home_stats.form_points is not None:
@@ -423,6 +439,12 @@ class ValueDetector:
 
                     min_edge = self.config.min_edge
                     max_edge = self.config.max_edge
+                elif outcome == "over_2_5":
+                    # Over 2.5 goals: 10-12% edge, Poisson model
+                    if decimal_odds < self.config.over_2_5_min_odds or decimal_odds > self.config.over_2_5_max_odds:
+                        continue
+                    min_edge = self.config.over_2_5_min_edge
+                    max_edge = self.config.over_2_5_max_edge
                 else:
                     # Standard strategy for draws
                     if decimal_odds < self.config.min_odds or decimal_odds > self.config.max_odds:
@@ -431,7 +453,9 @@ class ValueDetector:
                     max_edge = self.config.max_edge
 
                 # Get probabilities
-                consensus_prob = model_probs["consensus"][outcome]
+                consensus_prob = model_probs["consensus"].get(outcome)
+                if consensus_prob is None:
+                    continue
                 elo_prob = model_probs["elo"].get(outcome, consensus_prob)
                 poisson_prob = model_probs["poisson"].get(outcome, consensus_prob)
                 market_prob = 1.0 / decimal_odds
@@ -541,6 +565,12 @@ class ValueDetector:
                 "away_win": float(analysis.poisson_away_prob or consensus["away_win"]),
             }
 
+            # Add over_2_5 from Poisson model (only Poisson predicts this)
+            if analysis.poisson_over_2_5_prob:
+                over_2_5_prob = float(analysis.poisson_over_2_5_prob)
+                consensus["over_2_5"] = over_2_5_prob
+                poisson["over_2_5"] = over_2_5_prob
+
             return {
                 "consensus": consensus,
                 "elo": elo,
@@ -573,6 +603,8 @@ class ValueDetector:
                 market_odds[oh.bookmaker]["draw"] = float(oh.draw_odds)
             if oh.away_odds:
                 market_odds[oh.bookmaker]["away_win"] = float(oh.away_odds)
+            if oh.over_2_5_odds:
+                market_odds[oh.bookmaker]["over_2_5"] = float(oh.over_2_5_odds)
 
         # Fall back to historical odds in analysis.features
         if not market_odds and analysis and analysis.features:
@@ -589,6 +621,13 @@ class ValueDetector:
                         "draw": float(draw_odds),
                         "away_win": float(away_odds),
                     }
+
+                # Add over_2_5 odds if available
+                over_2_5_odds = hist_odds.get("avg_over_2_5_odds")
+                if over_2_5_odds:
+                    if "bet365" not in market_odds:
+                        market_odds["bet365"] = {}
+                    market_odds["bet365"]["over_2_5"] = float(over_2_5_odds)
 
         return market_odds
 
@@ -857,6 +896,7 @@ def format_value_opportunities(opportunities: list[ValueBetOpportunity]) -> str:
             "home_win": "Home Win",
             "draw": "Draw",
             "away_win": "Away Win",
+            "over_2_5": "Over 2.5 Goals",
         }.get(opp.outcome, opp.outcome)
 
         lines.append(f"\n{i}. {outcome_display} @ {opp.odds:.2f} ({opp.bookmaker})")
