@@ -557,9 +557,24 @@ if comparison_data:
 st.divider()
 st.subheader("Performance Over Time")
 
+# Selector for how many seasons to show
+col1, col2 = st.columns([1, 3])
+with col1:
+    num_seasons = st.selectbox(
+        "Seasons to show",
+        [5, 10, 15, "All"],
+        index=1,
+        key="num_seasons"
+    )
+
+# Get recent seasons (sorted chronologically)
+recent_seasons = sorted(df['season'].unique().tolist())  # Chronological order
+if num_seasons != "All":
+    recent_seasons = recent_seasons[-num_seasons:]  # Last N seasons
+
 # Calculate accuracy by season
 season_performance = []
-for season in seasons:
+for season in recent_seasons:
     season_df = df[df['season'] == season]
     for model in ['consensus', 'elo', 'poisson', 'dixon', 'pi', 'xgb']:
         metrics = calculate_model_metrics(season_df, model)
@@ -575,6 +590,11 @@ for season in seasons:
 if season_performance:
     perf_df = pd.DataFrame(season_performance)
 
+    # Ensure chronological order in chart
+    season_order = recent_seasons
+    perf_df['Season'] = pd.Categorical(perf_df['Season'], categories=season_order, ordered=True)
+    perf_df = perf_df.sort_values('Season')
+
     # Line chart
     fig = px.line(
         perf_df,
@@ -582,7 +602,7 @@ if season_performance:
         y='Accuracy',
         color='Model',
         markers=True,
-        title='Model Accuracy by Season'
+        title=f'Model Accuracy by Season (Last {num_seasons if num_seasons != "All" else len(recent_seasons)} Seasons)'
     )
 
     fig.add_hline(y=0.6, line_dash="dash", line_color="gray",
@@ -592,7 +612,8 @@ if season_performance:
         yaxis_tickformat='.0%',
         yaxis_range=[0.4, 0.75],
         template='plotly_dark',
-        height=400
+        height=400,
+        xaxis={'categoryorder': 'array', 'categoryarray': season_order}
     )
 
     st.plotly_chart(fig, use_container_width=True)
