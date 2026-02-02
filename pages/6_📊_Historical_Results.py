@@ -13,6 +13,7 @@ import db_init  # noqa: F401
 
 import streamlit as st
 import pandas as pd
+import threading
 from datetime import datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
@@ -60,7 +61,7 @@ def load_teams():
     """Load teams from database."""
     with SyncSessionLocal() as session:
         teams = list(session.execute(select(Team)).scalars().all())
-        return {t.id: {"name": t.name, "short_name": t.short_name} for t in teams}
+        return {t.id: {"name": t.name, "short_name": t.short_name, "crest_url": t.crest_url} for t in teams}
 
 
 @st.cache_data(ttl=300)
@@ -354,6 +355,172 @@ if not seasons:
 
 st.title("📊 Historical Results")
 
+# BBC-style CSS (same as Fixtures page)
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 2.5rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
+/* Date header */
+.date-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: #aaa;
+    padding: 20px 0 10px 0;
+    border-bottom: 1px solid #444;
+    margin-bottom: 12px;
+}
+
+/* Team name buttons */
+[data-testid="stHorizontalBlock"] button {
+    background: transparent !important;
+    border: none !important;
+    color: #4da6ff !important;
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    padding: 8px 4px !important;
+    min-height: 44px !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* Home team - right aligned */
+[data-testid="stHorizontalBlock"] > div:nth-child(1) button {
+    justify-content: flex-end !important;
+    text-align: right !important;
+}
+
+/* Away team - left aligned */
+[data-testid="stHorizontalBlock"] > div:nth-child(5) button {
+    justify-content: flex-start !important;
+    text-align: left !important;
+}
+[data-testid="stHorizontalBlock"] button:hover {
+    background: transparent !important;
+    color: #ffcc00 !important;
+}
+[data-testid="stHorizontalBlock"] button:focus {
+    box-shadow: none !important;
+}
+
+/* Score button - centered, larger, with background */
+[data-testid="stHorizontalBlock"] > div:nth-child(3) button {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-radius: 6px !important;
+    padding: 8px 12px !important;
+}
+[data-testid="stHorizontalBlock"] > div:nth-child(3) button:hover {
+    background: #ffcc00 !important;
+    color: #000000 !important;
+}
+
+/* Force columns to stay on one line - never wrap */
+[data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+}
+
+[data-testid="stHorizontalBlock"] > div {
+    flex-shrink: 1 !important;
+    min-width: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Center images vertically */
+[data-testid="stImage"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Center score box vertically */
+.score-box {
+    margin: 0 !important;
+}
+
+[data-testid="stHorizontalBlock"] > div:nth-child(3) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+[data-testid="stHorizontalBlock"] > div:nth-child(3) > div {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .block-container {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    .date-header {
+        font-size: 13px;
+        padding: 16px 0 8px 0;
+    }
+
+    [data-testid="stHorizontalBlock"] button {
+        font-size: 13px !important;
+        padding: 6px 2px !important;
+        min-height: 40px !important;
+    }
+
+    [data-testid="stHorizontalBlock"] > div {
+        padding: 0 !important;
+        min-width: 0 !important;
+    }
+}
+
+
+/* Very small screens */
+@media (max-width: 480px) {
+    h1 {
+        font-size: 1.3rem !important;
+    }
+
+    [data-testid="stHorizontalBlock"] button {
+        font-size: 12px !important;
+    }
+}
+
+/* Value bet result badges */
+.vb-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    margin: 2px;
+}
+.vb-badge-win {
+    background: linear-gradient(135deg, #0a4d2e 0%, #0d6b3d 100%);
+    color: #00ff88;
+    border: 1px solid #00ff88;
+}
+.vb-badge-loss {
+    background: linear-gradient(135deg, #4d0a0a 0%, #6b1a1a 100%);
+    color: #ff6666;
+    border: 1px solid #ff6666;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Default to current season from settings
 default_season = settings.current_season if settings.current_season in seasons else seasons[-1]
 
@@ -464,140 +631,40 @@ def check_bet_won(outcome: str, home_score: int, away_score: int) -> bool:
     return _check_bet_won(outcome, home_score, away_score)
 
 
-def render_results_table(results: list, teams: dict) -> tuple[str, int, int]:
-    """Render results as an HTML table. Returns (html, vb_wins, vb_total)."""
-    vb_wins = 0
-    vb_total = 0
-
-    # CSS styles
-    css = """
-    <style>
-    .results-table {
-        border-collapse: collapse;
-        font-size: 14px;
-        background-color: #0e1117;
-    }
-    .results-table th {
-        background-color: #262730;
-        color: #fafafa;
-        padding: 8px 10px;
-        text-align: left;
-        border-bottom: 2px solid #4a4a5a;
-    }
-    .results-table td {
-        padding: 6px 10px;
-        border-bottom: 1px solid #3a3a4a;
-        vertical-align: top;
-        color: #fafafa;
-        background-color: #0e1117;
-    }
-    .results-table tr:hover td {
-        background-color: #404050;
-        color: #ffffff;
-    }
-    .results-table .score {
-        text-align: center;
-        font-weight: bold;
-        white-space: nowrap;
-    }
-    .results-table .vb-line {
-        margin: 2px 0;
-        white-space: nowrap;
-    }
-    .results-table .vb-win {
-        color: #00cc66;
-    }
-    .results-table .vb-loss {
-        color: #ff4444;
-    }
-    .results-table .vb-pending {
-        color: #aaaaaa;
-    }
-    .results-table tr:hover .vb-win {
-        color: #00ff77;
-    }
-    .results-table tr:hover .vb-loss {
-        color: #ff6666;
-    }
-    </style>
-    """
-
-    # Table header
-    html = css + """
-    <table class="results-table">
-        <thead>
-            <tr>
-                <th>Home</th>
-                <th style="text-align: center;">Score</th>
-                <th>Away</th>
-                <th>Value Bet</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
-
-    for r in results:
-        home = teams.get(r["home_team_id"], {}).get("short_name", "?")
-        away = teams.get(r["away_team_id"], {}).get("short_name", "?")
-
-        # Score or kickoff time
-        if r["is_finished"]:
-            score = f"{r['home_score']} - {r['away_score']}"
-        else:
-            score = r["kickoff"].strftime("%a %H:%M")
-
-        # Value bets - each on its own line
-        vb_html = ""
-        if r["value_bets"]:
-            best_vbs = dedupe_value_bets(r["value_bets"])
-            for vb in best_vbs:
-                outcome_text = format_outcome(vb['outcome'])
-                odds_text = f"@{vb['odds']:.2f}"
-
-                if r["is_finished"]:
-                    won = check_bet_won(vb["outcome"], r["home_score"], r["away_score"])
-                    vb_total += 1
-                    if won:
-                        vb_wins += 1
-                        css_class = "vb-win"
-                        result_text = "✓"
-                    else:
-                        css_class = "vb-loss"
-                        result_text = "✗"
-                    vb_html += f'<div class="vb-line {css_class}">{outcome_text} {odds_text} {result_text}</div>'
-                else:
-                    vb_html += f'<div class="vb-line vb-pending">{outcome_text} {odds_text}</div>'
-
-        html += f"""
-            <tr>
-                <td>{home}</td>
-                <td class="score">{score}</td>
-                <td>{away}</td>
-                <td>{vb_html}</td>
-            </tr>
-        """
-
-    html += """
-        </tbody>
-    </table>
-    """
-
-    return html, vb_wins, vb_total
-
-
 # Content tabs
 tab1, tab2, tab3 = st.tabs(["Results", "Season Overview", "Value Bets"])
 
 with tab1:
-    # Matchweek slider
-    selected_mw = st.select_slider(
-        "Matchweek",
-        options=matchweeks,
-        value=st.session_state.hist_mw,
-        format_func=lambda x: f"MW {x}",
-    )
-    if selected_mw != st.session_state.hist_mw:
-        st.session_state.hist_mw = selected_mw
+    # Matchweek navigation with arrows (same as Fixtures page)
+    current_idx = matchweeks.index(selected_mw) if selected_mw in matchweeks else 0
+    can_go_prev = current_idx > 0
+    can_go_next = current_idx < len(matchweeks) - 1
+
+    def go_prev_mw():
+        idx = matchweeks.index(st.session_state.hist_mw)
+        if idx > 0:
+            st.session_state.hist_mw = matchweeks[idx - 1]
+
+    def go_next_mw():
+        idx = matchweeks.index(st.session_state.hist_mw)
+        if idx < len(matchweeks) - 1:
+            st.session_state.hist_mw = matchweeks[idx + 1]
+
+    prev_text = f"◀ MW {matchweeks[current_idx - 1]}" if can_go_prev else ""
+    next_text = f"MW {matchweeks[current_idx + 1]} ▶" if can_go_next else ""
+
+    nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+
+    with nav_col1:
+        if can_go_prev:
+            st.button(prev_text, key="prev_hist_mw", on_click=go_prev_mw)
+
+    with nav_col2:
+        st.markdown(f"<h2 style='text-align: center; margin: 0;'>Matchweek {selected_mw}</h2>", unsafe_allow_html=True)
+
+    with nav_col3:
+        if can_go_next:
+            st.button(next_text, key="next_hist_mw", on_click=go_next_mw)
 
     with st.spinner("Loading results..."):
         results = load_matchweek_results(selected_season, selected_mw)
@@ -605,34 +672,97 @@ with tab1:
     if not results:
         st.info("No matches found")
     else:
-        # Summary metrics - focus on value bets only
-        finished = [r for r in results if r["is_finished"]]
-
-        # Render HTML table
-        table_html, vb_wins, vb_total = render_results_table(results, teams)
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Matches", len(results))
-        col2.metric("Completed", len(finished))
-        if vb_total > 0:
-            col3.metric("Value Bets", f"{vb_wins}/{vb_total} won")
-
-        # Display table
-        st.html(table_html)
-
-        # Value bet summary for this matchweek
+        # Calculate value bet summary
         vb_results = []
-        for r in finished:
-            if r["value_bets"]:
+        for r in results:
+            if r["is_finished"] and r["value_bets"]:
                 for vb in dedupe_value_bets(r["value_bets"]):
                     won = check_bet_won(vb["outcome"], r["home_score"], r["away_score"])
                     profit = 10 * (vb["odds"] - 1) if won else -10
                     vb_results.append({"won": won, "profit": profit})
 
+        # Show value bet summary if any
         if vb_results:
             wins = sum(1 for v in vb_results if v["won"])
             total_profit = sum(v["profit"] for v in vb_results)
-            st.caption(f"Value bets: {wins}/{len(vb_results)} won, £{total_profit:+.0f}")
+            st.caption(f"Value bets: {wins}/{len(vb_results)} won • £{total_profit:+.0f}")
+
+        # Group fixtures by date
+        fixtures_by_date = {}
+        for r in results:
+            date_key = r["kickoff"].strftime("%A %d %B %Y")
+            if date_key not in fixtures_by_date:
+                fixtures_by_date[date_key] = []
+            fixtures_by_date[date_key].append(r)
+
+        # Render fixtures grouped by date (BBC-style)
+        for date_str, day_fixtures in fixtures_by_date.items():
+            st.markdown(f"<div class='date-header'>{date_str}</div>", unsafe_allow_html=True)
+
+            for r in day_fixtures:
+                home = teams.get(r["home_team_id"], {})
+                away = teams.get(r["away_team_id"], {})
+                home_name = home.get("short_name", "?")
+                away_name = away.get("short_name", "?")
+                home_crest = home.get("crest_url", "")
+                away_crest = away.get("crest_url", "")
+
+                if r["is_finished"]:
+                    score_text = f"{r['home_score']} - {r['away_score']}"
+                else:
+                    score_text = r["kickoff"].strftime("%H:%M")
+
+                match_id = r["id"]
+
+                # Fixture row - 5 columns: home, crest, score, crest, away
+                c1, c2, c3, c4, c5 = st.columns([1.7, 0.3, 0.8, 0.3, 1.7])
+
+                with c1:
+                    if st.button(home_name, key=f"hist_home_{match_id}", use_container_width=True):
+                        st.session_state["selected_match_id"] = match_id
+                        st.switch_page("pages/8_🔍_Match_Details.py")
+
+                with c2:
+                    if home_crest:
+                        st.image(home_crest, width=28)
+
+                with c3:
+                    if st.button(score_text, key=f"hist_score_{match_id}", use_container_width=True):
+                        st.session_state["selected_match_id"] = match_id
+                        st.switch_page("pages/8_🔍_Match_Details.py")
+
+                with c4:
+                    if away_crest:
+                        st.image(away_crest, width=28)
+
+                with c5:
+                    if st.button(away_name, key=f"hist_away_{match_id}", use_container_width=True):
+                        st.session_state["selected_match_id"] = match_id
+                        st.switch_page("pages/8_🔍_Match_Details.py")
+
+                # Value bet results for this fixture
+                if r["value_bets"] and r["is_finished"]:
+                    vbs = dedupe_value_bets(r["value_bets"])
+                    vb_badges = []
+                    for vb in vbs:
+                        won = check_bet_won(vb["outcome"], r["home_score"], r["away_score"])
+                        badge_class = "vb-badge-win" if won else "vb-badge-loss"
+                        result_icon = "✓" if won else "✗"
+                        vb_badges.append(
+                            f"<span class='vb-badge {badge_class}'>"
+                            f"{format_outcome(vb['outcome'])} @{vb['odds']:.2f} {result_icon}"
+                            f"</span>"
+                        )
+                    if vb_badges:
+                        vb_col1, vb_col2, vb_col3 = st.columns([1, 2, 1])
+                        with vb_col2:
+                            st.markdown(
+                                f"<div style='text-align: center;'>{''.join(vb_badges)}</div>",
+                                unsafe_allow_html=True
+                            )
+
+                # Separator after each fixture
+                st.markdown("<hr style='margin:0;border:none;border-top:1px solid #333;'>", unsafe_allow_html=True)
 
 with tab2:
     st.subheader(f"Value Bet Performance by Matchweek")
@@ -804,3 +934,32 @@ with tab3:
             </table>
             """
             st.html(bet_html)
+
+# Preload adjacent matchweeks in background for faster navigation
+def preload_matchweek(season, mw):
+    """Preload a matchweek in background thread to populate cache."""
+    try:
+        load_matchweek_results(season, mw)
+    except Exception:
+        pass  # Silently ignore preload errors
+
+if matchweeks:
+    current_idx = matchweeks.index(selected_mw) if selected_mw in matchweeks else 0
+
+    # Preload 5 matchweeks in each direction
+    for offset in range(1, 6):
+        # Previous matchweeks
+        if current_idx - offset >= 0:
+            threading.Thread(
+                target=preload_matchweek,
+                args=(selected_season, matchweeks[current_idx - offset]),
+                daemon=True
+            ).start()
+
+        # Next matchweeks
+        if current_idx + offset < len(matchweeks):
+            threading.Thread(
+                target=preload_matchweek,
+                args=(selected_season, matchweeks[current_idx + offset]),
+                daemon=True
+            ).start()
