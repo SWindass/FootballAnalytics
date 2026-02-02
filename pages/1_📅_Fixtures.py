@@ -571,10 +571,12 @@ def preload_matchweek(mw):
 if matchweeks:
     current_idx = matchweeks.index(selected_mw) if selected_mw in matchweeks else 0
 
-    # Preload previous matchweek in background
-    if current_idx > 0:
-        threading.Thread(target=preload_matchweek, args=(matchweeks[current_idx - 1],), daemon=True).start()
+    # Preload 5 matchweeks in each direction
+    for offset in range(1, 6):
+        # Previous matchweeks
+        if current_idx - offset >= 0:
+            threading.Thread(target=preload_matchweek, args=(matchweeks[current_idx - offset],), daemon=True).start()
 
-    # Preload next matchweek in background
-    if current_idx < len(matchweeks) - 1:
-        threading.Thread(target=preload_matchweek, args=(matchweeks[current_idx + 1],), daemon=True).start()
+        # Next matchweeks
+        if current_idx + offset < len(matchweeks):
+            threading.Thread(target=preload_matchweek, args=(matchweeks[current_idx + offset],), daemon=True).start()
