@@ -12,6 +12,7 @@ if scripts_dir not in sys.path:
 import db_init  # noqa: F401
 
 import streamlit as st
+import threading
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from itertools import groupby
@@ -558,3 +559,22 @@ for date_str, day_fixtures in fixtures_by_date.items():
 # Footer
 st.divider()
 st.caption(f"Showing {len(fixtures)} fixtures for Matchweek {selected_mw} • Season {settings.current_season}")
+
+# Preload adjacent matchweeks in background for faster navigation
+def preload_matchweek(mw):
+    """Preload a matchweek in background thread to populate cache."""
+    try:
+        load_matchweek_fixtures(mw)
+    except Exception:
+        pass  # Silently ignore preload errors
+
+if matchweeks:
+    current_idx = matchweeks.index(selected_mw) if selected_mw in matchweeks else 0
+
+    # Preload previous matchweek in background
+    if current_idx > 0:
+        threading.Thread(target=preload_matchweek, args=(matchweeks[current_idx - 1],), daemon=True).start()
+
+    # Preload next matchweek in background
+    if current_idx < len(matchweeks) - 1:
+        threading.Thread(target=preload_matchweek, args=(matchweeks[current_idx + 1],), daemon=True).start()
