@@ -14,7 +14,7 @@ import db_init  # noqa: F401
 import streamlit as st
 import json
 import plotly.graph_objects as go
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from app.db.database import SyncSessionLocal
@@ -50,22 +50,6 @@ def load_model_metadata(path: Path) -> dict:
 
 
 
-def train_consensus_model():
-    """Train the consensus stacker model."""
-    from batch.models.consensus_stacker import ConsensusStacker
-
-    stacker = ConsensusStacker()
-    result = stacker.train(epochs=100, batch_size=64)
-    return result
-
-
-def train_neural_stacker():
-    """Train the neural stacker model."""
-    from batch.models.neural_stacker import NeuralStacker
-
-    stacker = NeuralStacker()
-    result = stacker.train(epochs=50)
-    return result
 
 
 # Main content
@@ -155,15 +139,20 @@ with tab1:
             st.caption("No resolved value bets yet.")
 
 with tab2:
-    st.header("Model Training")
+    st.header("Retrain Everything")
 
     st.markdown("""
-    ### Consensus Stacker
-    The consensus stacker learns to combine predictions from multiple models (ELO, Poisson, Market odds)
-    and boost confidence when models agree. It uses a neural network with agreement features.
+    This will perform a **full system refresh**:
 
-    **Training data**: All finished matches with complete predictions
+    1. **Update Scores** - Fetch latest match results
+    2. **Update xG Data** - Fetch expected goals from Understat
+    3. **Recalculate ELO** - Rebuild all ELO ratings from scratch
+    4. **Update Team Stats** - Recalculate form, goals, clean sheets etc.
+    5. **Resolve Value Bets** - Mark finished bets as won/lost
+    6. **Train Models** - Retrain both Consensus and Neural stackers
     """)
+
+    st.warning("⚠️ This process takes several minutes. Only run when needed.")
 
     # Training stats
     with SyncSessionLocal() as session:
@@ -188,41 +177,42 @@ with tab2:
 
     st.divider()
 
-    # Training buttons
-    col1, col2 = st.columns(2)
+    # Single retrain button
+    if st.button("🔄 Retrain Everything", type="primary", use_container_width=True):
+        with st.spinner("Running full recalculation... This may take several minutes."):
+            try:
+                from batch.jobs.results_update import run_full_recalculation
+                result = run_full_recalculation()
 
-    with col1:
-        st.subheader("Train Consensus Stacker")
-        if st.button("🚀 Train Consensus Model", type="primary", key="train_consensus"):
-            with st.spinner("Training consensus stacker (this may take a few minutes)..."):
-                try:
-                    result = train_consensus_model()
-                    st.success(f"Training complete! Refreshing stats...")
-                    st.json(result)
-                    st.rerun()  # Refresh page to show updated stats
-                except Exception as e:
-                    st.error(f"Training failed: {e}")
+                st.success("Full recalculation complete!")
 
-    with col2:
-        st.subheader("Train Neural Stacker")
-        if st.button("🚀 Train Neural Model", type="primary", key="train_neural"):
-            with st.spinner("Training neural stacker (this may take a few minutes)..."):
-                try:
-                    result = train_neural_stacker()
-                    st.success(f"Training complete! Refreshing stats...")
-                    st.json(result)
-                    st.rerun()  # Refresh page to show updated stats
-                except Exception as e:
-                    st.error(f"Training failed: {e}")
+                # Show summary
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Scores Updated", result.get("matches_updated", 0))
+                col2.metric("ELO Matchweeks", result.get("elo_recalculated", 0))
+                col3.metric("Bets Resolved", result.get("bets_resolved", 0))
+
+                # Show model training results
+                models = result.get("models_trained", {})
+                if models:
+                    st.subheader("Model Training Results")
+                    for model_name, model_result in models.items():
+                        if "error" in model_result:
+                            st.error(f"{model_name}: {model_result['error']}")
+                        else:
+                            st.json({model_name: model_result})
+
+                st.rerun()
+            except Exception as e:
+                st.error(f"Recalculation failed: {e}")
 
     st.divider()
 
     st.markdown("""
-    ### Training Notes
-    - Models are trained using time-series cross-validation (last 20% for validation)
-    - Training typically takes 1-3 minutes depending on data size
-    - The best model (by validation accuracy) is automatically saved
-    - After training, predictions will use the new model automatically
+    ### When to Retrain
+    - After a matchweek completes (to incorporate new results)
+    - If model accuracy seems degraded
+    - After making changes to feature engineering
     """)
 
 with tab3:

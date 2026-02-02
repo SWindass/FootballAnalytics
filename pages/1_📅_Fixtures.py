@@ -251,8 +251,8 @@ with st.sidebar:
         if st.button("🔄 Update Scores", use_container_width=True):
             with st.spinner("Updating scores..."):
                 try:
-                    from batch.jobs.results_update import run_results_update
-                    result = run_results_update()
+                    from batch.jobs.results_update import run_scores_only_update
+                    result = run_scores_only_update()
                     st.success(f"Updated {result['matches_updated']} matches")
                     if result.get('bets_resolved', 0) > 0:
                         st.info(f"Resolved {result['bets_resolved']} value bets")

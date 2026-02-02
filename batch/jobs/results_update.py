@@ -519,6 +519,135 @@ def run_results_update():
         return job.run()
 
 
+def run_scores_only_update():
+    """Lightweight update - just fetch scores and resolve bets.
+
+    Skips ELO recalculation, team stats, xG, and model retraining.
+    Use this for quick score refreshes from the UI.
+    """
+    logger.info("Starting scores-only update")
+    start_time = datetime.utcnow()
+
+    with SyncSessionLocal() as session:
+        job = ResultsUpdateJob(session)
+
+        try:
+            # 1. Fetch recent results from API
+            recent_results = asyncio.run(job._fetch_recent_results())
+            logger.info(f"Fetched {len(recent_results)} results from API")
+
+            # 2. Update matches in database
+            updated_count = job._update_match_results(recent_results)
+            logger.info(f"Updated {updated_count} match results")
+
+            # Flush to make status changes visible
+            session.flush()
+
+            # 3. Resolve value bets (fast operation)
+            bets_resolved = job._resolve_value_bets()
+
+            session.commit()
+
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(
+                "Scores-only update completed",
+                matches_updated=updated_count,
+                bets_resolved=bets_resolved,
+                duration_seconds=duration,
+            )
+
+            return {
+                "status": "success",
+                "matches_updated": updated_count,
+                "bets_resolved": bets_resolved,
+                "duration_seconds": duration,
+            }
+
+        except Exception as e:
+            logger.error("Scores-only update failed", error=str(e))
+            session.rollback()
+            raise
+
+
+def run_full_recalculation():
+    """Full recalculation - ELO, team stats, and model retraining.
+
+    Use this from the Model Training page for complete refresh.
+    """
+    logger.info("Starting full recalculation")
+    start_time = datetime.utcnow()
+
+    with SyncSessionLocal() as session:
+        job = ResultsUpdateJob(session)
+
+        try:
+            # 1. Fetch and update scores first
+            recent_results = asyncio.run(job._fetch_recent_results())
+            updated_count = job._update_match_results(recent_results)
+            session.flush()
+
+            # 2. Fetch xG data
+            xg_updated = asyncio.run(job._update_xg_data())
+
+            # 3. Recalculate ELO ratings
+            elo_updated = job._recalculate_elo_ratings()
+
+            # 4. Update team statistics
+            stats_updated = job._update_team_stats()
+
+            # 5. Resolve value bets
+            bets_resolved = job._resolve_value_bets()
+
+            session.commit()
+
+            # 6. Retrain models (always, since this is explicit user action)
+            model_results = {}
+
+            # Train consensus stacker
+            try:
+                from batch.models.consensus_stacker import ConsensusStacker
+                stacker = ConsensusStacker()
+                model_results["consensus"] = stacker.train(epochs=100, batch_size=64)
+            except Exception as e:
+                logger.warning(f"Consensus stacker training failed: {e}")
+                model_results["consensus"] = {"error": str(e)}
+
+            # Train neural stacker
+            try:
+                stacker = NeuralStacker()
+                model_results["neural"] = stacker.train(epochs=50)
+            except Exception as e:
+                logger.warning(f"Neural stacker training failed: {e}")
+                model_results["neural"] = {"error": str(e)}
+
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(
+                "Full recalculation completed",
+                matches_updated=updated_count,
+                xg_updated=xg_updated,
+                elo_updated=elo_updated,
+                stats_updated=stats_updated,
+                bets_resolved=bets_resolved,
+                duration_seconds=duration,
+            )
+
+            return {
+                "status": "success",
+                "matches_updated": updated_count,
+                "xg_updated": xg_updated,
+                "elo_recalculated": elo_updated,
+                "stats_updated": stats_updated,
+                "bets_resolved": bets_resolved,
+                "models_trained": model_results,
+                "duration_seconds": duration,
+            }
+
+        except Exception as e:
+            logger.error("Full recalculation failed", error=str(e))
+            session.rollback()
+            raise
+
+
 if __name__ == "__main__":
     result = run_results_update()
     print(f"Job completed: {result}")
