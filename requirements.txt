@@ -31,5 +31,8 @@ structlog>=24.1.0
 httpx>=0.26.0
 tenacity>=8.2.3
 
+# AI (for narrative generation)
+anthropic>=0.18.0
+
 # Charts
 plotly>=5.18.0
