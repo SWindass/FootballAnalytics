@@ -62,6 +62,8 @@ class NarrativeGenerator:
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.anthropic_api_key
+        if not self.api_key:
+            logger.warning("ANTHROPIC_API_KEY not set - narratives will use placeholder text")
         self.client = anthropic.Anthropic(api_key=self.api_key) if self.api_key else None
 
     async def generate_match_preview(
@@ -141,8 +143,14 @@ class NarrativeGenerator:
                 messages=[{"role": "user", "content": prompt}],
             )
             return message.content[0].text
+        except anthropic.RateLimitError as e:
+            logger.warning(f"Rate limited by Anthropic API, using placeholder: {e}")
+            return self._generate_placeholder(match_data, predictions)
+        except anthropic.APIError as e:
+            logger.error(f"Anthropic API error: {e}")
+            return self._generate_placeholder(match_data, predictions)
         except Exception as e:
-            logger.error("Failed to generate narrative", error=str(e))
+            logger.error(f"Failed to generate narrative: {type(e).__name__}: {e}")
             return self._generate_placeholder(match_data, predictions)
 
     def _format_h2h(self, h2h_history: list[dict]) -> str:
