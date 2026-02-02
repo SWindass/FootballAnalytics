@@ -139,6 +139,34 @@ with tab1:
             st.caption("No resolved value bets yet.")
 
 with tab2:
+    # Generate Analysis for upcoming matches
+    st.header("Generate Match Analysis")
+
+    st.markdown("""
+    Generate **predictions and AI narratives** for upcoming matches:
+
+    - ELO and Poisson probability predictions
+    - Consensus model predictions
+    - AI-generated match previews
+    - Value bet detection
+    """)
+
+    if st.button("🔮 Generate Analysis", type="primary", use_container_width=True):
+        with st.spinner("Generating analysis for upcoming matches..."):
+            try:
+                from batch.jobs.weekly_analysis import run_weekly_analysis
+                result = run_weekly_analysis()
+
+                if result.get("status") == "skipped":
+                    st.warning(f"Skipped: {result.get('reason', 'Unknown reason')}")
+                else:
+                    st.success(f"Generated analysis for {result.get('analyses_created', 0)} matches in MW {result.get('matchweek', '?')}")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Analysis generation failed: {e}")
+
+    st.divider()
+
     st.header("Retrain Everything")
 
     st.markdown("""
