@@ -19,7 +19,7 @@ from pathlib import Path
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from auth import require_auth, show_user_info
 from pwa import inject_pwa_tags
 
@@ -133,7 +133,7 @@ with tab1:
         stmt = (
             select(
                 func.count(ValueBet.id),
-                func.sum(func.case((ValueBet.result == 'won', 1), else_=0)),
+                func.sum(case((ValueBet.result == 'won', 1), else_=0)),
                 func.sum(ValueBet.profit_loss)
             )
             .join(Match, ValueBet.match_id == Match.id)
