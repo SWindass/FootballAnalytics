@@ -552,7 +552,8 @@ class WeeklyAnalysisJob:
         if not existing:
             self.session.add(analysis)
 
-        # Generate AI narrative
+        # Generate AI narrative with rate limiting
+        import time
         try:
             narrative = self._generate_narrative(
                 match, teams, team_stats, consensus, home_exp, away_exp,
@@ -562,6 +563,8 @@ class WeeklyAnalysisJob:
                 analysis.narrative = narrative
                 analysis.narrative_generated_at = datetime.utcnow()
                 logger.info(f"Generated narrative for {teams[home_id].short_name} vs {teams[away_id].short_name}")
+                # Small delay to avoid rate limiting (Anthropic allows ~60 requests/min on free tier)
+                time.sleep(1.5)
         except Exception as e:
             logger.warning(f"Failed to generate narrative for match {match.id}", error=str(e))
 
