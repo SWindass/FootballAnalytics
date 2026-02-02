@@ -709,9 +709,17 @@ with tab3:
             by_outcome[p["outcome"]]["profit"] += p["profit"]
 
         st.subheader("By Outcome")
-        outcome_cols = st.columns(3)
-        for i, (outcome, label) in enumerate([("home_win", "Home"), ("draw", "Draw"), ("away_win", "Away")]):
-            if outcome in by_outcome:
+        outcomes_to_show = [
+            ("away_win", "Away Win"),
+            ("home_win", "Home Win"),
+            ("over_2_5", "Over 2.5"),
+        ]
+        # Filter to outcomes that have data
+        outcomes_with_data = [(o, l) for o, l in outcomes_to_show if o in by_outcome and by_outcome[o]["bets"] > 0]
+
+        if outcomes_with_data:
+            outcome_cols = st.columns(len(outcomes_with_data))
+            for i, (outcome, label) in enumerate(outcomes_with_data):
                 d = by_outcome[outcome]
                 win_rate = d["wins"] / d["bets"] * 100 if d["bets"] else 0
                 outcome_roi = d["profit"] / (d["bets"] * 10) * 100 if d["bets"] else 0

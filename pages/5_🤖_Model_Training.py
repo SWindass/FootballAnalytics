@@ -14,10 +14,8 @@ import db_init  # noqa: F401
 import streamlit as st
 import json
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime, timezone
 from pathlib import Path
-import numpy as np
 
 from app.db.database import SyncSessionLocal
 from app.db.models import Match, MatchAnalysis, MatchStatus
@@ -50,110 +48,6 @@ def load_model_metadata(path: Path) -> dict:
     return {}
 
 
-def get_historical_accuracy():
-    """Calculate historical accuracy of predictions vs actual results."""
-    with SyncSessionLocal() as session:
-        # Get finished matches with predictions
-        stmt = (
-            select(Match, MatchAnalysis)
-            .join(MatchAnalysis, Match.id == MatchAnalysis.match_id)
-            .where(Match.status == MatchStatus.FINISHED)
-            .where(Match.home_score.isnot(None))
-            .where(MatchAnalysis.consensus_home_prob.isnot(None))
-            .order_by(Match.kickoff_time.desc())
-        )
-        results = session.execute(stmt).all()
-
-        if not results:
-            return None
-
-        # Calculate accuracy
-        correct = 0
-        total = 0
-        by_confidence = {"high": {"correct": 0, "total": 0}, "medium": {"correct": 0, "total": 0}, "low": {"correct": 0, "total": 0}}
-        by_agreement = {"agree": {"correct": 0, "total": 0}, "disagree": {"correct": 0, "total": 0}}
-        recent_results = []
-
-        for match, analysis in results:
-            home_prob = float(analysis.consensus_home_prob)
-            draw_prob = float(analysis.consensus_draw_prob)
-            away_prob = float(analysis.consensus_away_prob)
-
-            # Determine predicted outcome
-            probs = [home_prob, draw_prob, away_prob]
-            predicted = np.argmax(probs)  # 0=home, 1=draw, 2=away
-
-            # Determine actual outcome
-            if match.home_score > match.away_score:
-                actual = 0  # Home win
-            elif match.home_score < match.away_score:
-                actual = 2  # Away win
-            else:
-                actual = 1  # Draw
-
-            is_correct = predicted == actual
-            if is_correct:
-                correct += 1
-            total += 1
-
-            # Confidence buckets
-            confidence = float(analysis.confidence) if analysis.confidence else 0.33
-            if confidence >= 0.5:
-                bucket = "high"
-            elif confidence >= 0.4:
-                bucket = "medium"
-            else:
-                bucket = "low"
-
-            by_confidence[bucket]["total"] += 1
-            if is_correct:
-                by_confidence[bucket]["correct"] += 1
-
-            # Model agreement - check if ELO, Poisson, and Market all predict same outcome
-            elo_pred = None
-            poisson_pred = None
-            market_pred = None
-
-            if analysis.elo_home_prob and analysis.elo_draw_prob and analysis.elo_away_prob:
-                elo_probs = [float(analysis.elo_home_prob), float(analysis.elo_draw_prob), float(analysis.elo_away_prob)]
-                elo_pred = np.argmax(elo_probs)
-
-            if analysis.poisson_home_prob and analysis.poisson_draw_prob and analysis.poisson_away_prob:
-                poisson_probs = [float(analysis.poisson_home_prob), float(analysis.poisson_draw_prob), float(analysis.poisson_away_prob)]
-                poisson_pred = np.argmax(poisson_probs)
-
-            if analysis.features:
-                hist_odds = analysis.features.get("historical_odds", {})
-                if hist_odds and hist_odds.get("implied_home_prob"):
-                    market_probs = [hist_odds.get("implied_home_prob"), hist_odds.get("implied_draw_prob"), hist_odds.get("implied_away_prob")]
-                    market_pred = np.argmax(market_probs)
-
-            # Only count if we have all three models
-            if elo_pred is not None and poisson_pred is not None and market_pred is not None:
-                models_agree = (elo_pred == poisson_pred == market_pred)
-                bucket = "agree" if models_agree else "disagree"
-                by_agreement[bucket]["total"] += 1
-                if is_correct:
-                    by_agreement[bucket]["correct"] += 1
-
-            # Store recent for chart
-            if len(recent_results) < 100:
-                recent_results.append({
-                    "date": match.kickoff_time,
-                    "predicted": predicted,
-                    "actual": actual,
-                    "correct": is_correct,
-                    "confidence": confidence,
-                })
-
-        return {
-            "total_accuracy": correct / total if total > 0 else 0,
-            "total_matches": total,
-            "correct": correct,
-            "by_confidence": by_confidence,
-            "by_agreement": by_agreement,
-            "recent": recent_results,
-        }
 
 
 def train_consensus_model():
@@ -226,216 +120,39 @@ with tab1:
 
     st.divider()
 
-    # Historical accuracy
-    st.subheader("Historical Prediction Accuracy")
+    # Value Bet Performance Summary
+    st.subheader("Value Bet Performance")
 
-    with st.spinner("Calculating historical accuracy..."):
-        accuracy_data = get_historical_accuracy()
+    st.info("📊 For detailed value bet performance analysis, see the **Historical Results** page.")
 
-    if accuracy_data:
-        col1, col2, col3, col4 = st.columns(4)
+    # Quick summary from value bets
+    with SyncSessionLocal() as vb_session:
+        from app.db.models import ValueBet
 
-        with col1:
-            st.metric(
-                "Overall Accuracy",
-                f"{accuracy_data['total_accuracy']*100:.1f}%",
-                help="Percentage of matches where predicted outcome matched actual"
+        # Get summary stats
+        stmt = (
+            select(
+                func.count(ValueBet.id),
+                func.sum(func.case((ValueBet.result == 'won', 1), else_=0)),
+                func.sum(ValueBet.profit_loss)
             )
+            .join(Match, ValueBet.match_id == Match.id)
+            .where(Match.status == MatchStatus.FINISHED)
+            .where(ValueBet.result.isnot(None))
+        )
+        result = vb_session.execute(stmt).first()
+        total_bets, wins, profit = result if result else (0, 0, 0)
 
-        with col2:
-            st.metric("Total Predictions", f"{accuracy_data['total_matches']:,}")
+        if total_bets and total_bets > 0:
+            wins = wins or 0
+            profit = float(profit) if profit else 0
 
-        with col3:
-            st.metric("Correct", f"{accuracy_data['correct']:,}")
-
-        with col4:
-            baseline = 100/3  # Random would be 33.3%
-            improvement = accuracy_data['total_accuracy']*100 - baseline
-            st.metric(
-                "vs Random",
-                f"+{improvement:.1f}pp",
-                help="Improvement over random guessing (33.3%)"
-            )
-
-        # Accuracy by confidence
-        st.subheader("Accuracy by Confidence Level")
-
-        conf_data = accuracy_data["by_confidence"]
-        conf_df = []
-        for level, data in conf_data.items():
-            if data["total"] > 0:
-                acc = data["correct"] / data["total"]
-                conf_df.append({
-                    "Confidence": level.title(),
-                    "Accuracy": acc,
-                    "Matches": data["total"],
-                })
-
-        if conf_df:
             col1, col2, col3 = st.columns(3)
-
-            for i, row in enumerate(conf_df):
-                with [col1, col2, col3][i]:
-                    st.metric(
-                        f"{row['Confidence']} Confidence",
-                        f"{row['Accuracy']*100:.1f}%",
-                        help=f"Based on {row['Matches']} matches"
-                    )
-
-        # Accuracy by model agreement
-        st.subheader("Accuracy by Model Agreement")
-
-        agree_data = accuracy_data["by_agreement"]
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if agree_data["agree"]["total"] > 0:
-                acc = agree_data["agree"]["correct"] / agree_data["agree"]["total"]
-                st.metric(
-                    "Models Agree",
-                    f"{acc*100:.1f}%",
-                    help=f"When ELO, Poisson, and Market all pick same favorite ({agree_data['agree']['total']} matches)"
-                )
-            else:
-                st.metric("Models Agree", "N/A")
-
-        with col2:
-            if agree_data["disagree"]["total"] > 0:
-                acc = agree_data["disagree"]["correct"] / agree_data["disagree"]["total"]
-                st.metric(
-                    "Models Disagree",
-                    f"{acc*100:.1f}%",
-                    help=f"When models pick different favorites ({agree_data['disagree']['total']} matches)"
-                )
-            else:
-                st.metric("Models Disagree", "N/A")
-
-        # Accuracy by matchweek chart
-        st.subheader("Prediction Accuracy by Matchweek")
-
-        # Query accuracy grouped by matchweek
-        with SyncSessionLocal() as mw_session:
-            from collections import defaultdict
-
-            stmt = (
-                select(Match, MatchAnalysis)
-                .join(MatchAnalysis, Match.id == MatchAnalysis.match_id)
-                .where(Match.status == MatchStatus.FINISHED)
-                .where(Match.home_score.isnot(None))
-                .where(MatchAnalysis.consensus_home_prob.isnot(None))
-                .order_by(Match.season, Match.matchweek)
-            )
-            mw_results = mw_session.execute(stmt).all()
-
-            # Group by season and matchweek - track both model and market odds
-            mw_stats = defaultdict(lambda: {
-                "model_correct": 0, "model_total": 0,
-                "market_correct": 0, "market_total": 0
-            })
-
-            for match, analysis in mw_results:
-                key = (match.season, match.matchweek)
-
-                # Determine actual outcome
-                if match.home_score > match.away_score:
-                    actual = 0
-                elif match.home_score < match.away_score:
-                    actual = 2
-                else:
-                    actual = 1
-
-                # Model prediction
-                home_prob = float(analysis.consensus_home_prob)
-                draw_prob = float(analysis.consensus_draw_prob)
-                away_prob = float(analysis.consensus_away_prob)
-                model_predicted = np.argmax([home_prob, draw_prob, away_prob])
-
-                mw_stats[key]["model_total"] += 1
-                if model_predicted == actual:
-                    mw_stats[key]["model_correct"] += 1
-
-                # Market odds prediction (if available)
-                if analysis.features:
-                    hist_odds = analysis.features.get("historical_odds", {})
-                    if hist_odds and hist_odds.get("implied_home_prob"):
-                        market_probs = [
-                            hist_odds.get("implied_home_prob", 0),
-                            hist_odds.get("implied_draw_prob", 0),
-                            hist_odds.get("implied_away_prob", 0)
-                        ]
-                        market_predicted = np.argmax(market_probs)
-
-                        mw_stats[key]["market_total"] += 1
-                        if market_predicted == actual:
-                            mw_stats[key]["market_correct"] += 1
-
-            # Filter to complete matchweeks (10 matches) and recent seasons
-            complete_mws = [
-                (k, v) for k, v in sorted(mw_stats.items())
-                if v["model_total"] >= 8  # Allow slightly incomplete weeks
-            ]
-
-            # Take last 40 matchweeks for display
-            recent_mws = complete_mws[-40:]
-
-            if recent_mws:
-                x_labels = [f"{k[0][-5:]}\nMW{k[1]}" for k, v in recent_mws]
-                model_values = [v["model_correct"] / v["model_total"] * 100 for k, v in recent_mws]
-                market_values = [
-                    v["market_correct"] / v["market_total"] * 100 if v["market_total"] > 0 else None
-                    for k, v in recent_mws
-                ]
-
-                fig = go.Figure()
-
-                # Model accuracy as bars
-                fig.add_trace(go.Bar(
-                    x=list(range(len(x_labels))),
-                    y=model_values,
-                    name="Model",
-                    marker_color=['#E74C3C' if y < 33.3 else '#2E86AB' for y in model_values],
-                    text=[f"{y:.0f}%" for y in model_values],
-                    textposition='outside',
-                ))
-
-                # Market odds accuracy as line overlay
-                valid_market = [(i, v) for i, v in enumerate(market_values) if v is not None]
-                if valid_market:
-                    fig.add_trace(go.Scatter(
-                        x=[i for i, v in valid_market],
-                        y=[v for i, v in valid_market],
-                        name="Market Odds",
-                        mode='lines+markers',
-                        line=dict(color='#F18F01', width=3),
-                        marker=dict(size=8),
-                    ))
-
-                fig.add_hline(y=33.3, line_dash="dash", line_color="gray",
-                             annotation_text="Random (33.3%)")
-
-                fig.update_layout(
-                    title="Model vs Market Odds Accuracy by Matchweek",
-                    xaxis_title="Season / Matchweek",
-                    yaxis_title="Accuracy %",
-                    yaxis=dict(range=[0, 100]),
-                    xaxis=dict(
-                        tickmode='array',
-                        tickvals=list(range(len(x_labels))),
-                        ticktext=x_labels,
-                        tickangle=45,
-                    ),
-                    height=450,
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-                st.caption("Blue/red bars = Model accuracy | Orange line = Market odds accuracy | Red bars = below random (33.3%)")
-            else:
-                st.info("Not enough completed matchweeks to display")
-    else:
-        st.info("No historical predictions found to analyze")
+            col1.metric("Resolved Bets", f"{total_bets:,}")
+            col2.metric("Win Rate", f"{wins/total_bets*100:.0f}%")
+            col3.metric("Total P/L", f"£{profit:+,.0f}")
+        else:
+            st.caption("No resolved value bets yet.")
 
 with tab2:
     st.header("Model Training")
